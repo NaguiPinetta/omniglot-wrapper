@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
-import type { Dataset, DatasetStore } from '../types/datasets';
-import { getDatasets } from '../lib/datasets/api';
+import type { Dataset, DatasetStore, DatasetFormData } from '../types/datasets';
+import { getDatasets, uploadAndCreateDataset, updateDataset, deleteDataset } from '../lib/datasets/api';
 
 function createDatasetStore() {
   const { subscribe, set, update } = writable<DatasetStore>({
@@ -12,53 +12,45 @@ function createDatasetStore() {
   return {
     subscribe,
     
-    // Load all datasets
     async loadDatasets() {
       update(state => ({ ...state, loading: true, error: null }));
       try {
         const datasets = await getDatasets();
-        update(state => ({ ...state, datasets }));
+        set({ datasets, loading: false, error: null });
       } catch (error) {
-        update(state => ({ ...state, error: error instanceof Error ? error.message : 'Failed to load datasets' }));
-      } finally {
-        update(state => ({ ...state, loading: false }));
+        set({ datasets: [], loading: false, error: error instanceof Error ? error.message : 'Failed to load datasets' });
       }
     },
 
-    // Add a new dataset
-    addDataset(dataset: Dataset) {
-      update(state => ({
-        ...state,
-        datasets: [dataset, ...state.datasets]
-      }));
+    async addDataset(formData: DatasetFormData) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await uploadAndCreateDataset(formData);
+        await this.loadDatasets();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to add dataset' }));
+      }
     },
 
-    // Update an existing dataset
-    updateDataset(updatedDataset: Dataset) {
-      update(state => ({
-        ...state,
-        datasets: state.datasets.map(d => 
-          d.id === updatedDataset.id ? updatedDataset : d
-        )
-      }));
+    async updateDataset(id: string, dataset: Partial<Dataset>) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await updateDataset(id, dataset);
+        await this.loadDatasets();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to update dataset' }));
+      }
     },
 
-    // Remove a dataset
-    removeDataset(id: string) {
-      update(state => ({
-        ...state,
-        datasets: state.datasets.filter(d => d.id !== id)
-      }));
+    async deleteDataset(id: string) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await deleteDataset(id);
+        await this.loadDatasets();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to delete dataset' }));
+      }
     },
-
-    // Reset the store
-    reset() {
-      set({
-        datasets: [],
-        loading: false,
-        error: null
-      });
-    }
   };
 }
 

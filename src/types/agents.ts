@@ -1,27 +1,21 @@
-export interface Agent {
+export type Agent = {
   id: string;
-  name: string;
-  description: string;
-  type: 'translator' | 'reviewer' | 'custom';
+  custom_name: string;
   model: string;
-  temperature: number;
-  max_tokens: number;
-  system_prompt: string;
-  user_prompt_template: string;
-  is_active: boolean;
+  model_provider: 'openai' | 'deepseek' | 'mistral' | 'custom';
+  prompt: string;
+  temperature?: number;
+  top_p?: number;
   created_at: string;
-  updated_at: string;
-}
+};
 
 export interface AgentFormData {
-  name: string;
-  description: string;
-  type: Agent['type'];
+  custom_name: string;
   model: string;
-  temperature: number;
-  max_tokens: number;
-  system_prompt: string;
-  user_prompt_template: string;
+  model_provider: Agent['model_provider'];
+  prompt: string;
+  temperature?: number;
+  top_p?: number;
 }
 
 export interface AgentStore {
@@ -30,7 +24,7 @@ export interface AgentStore {
   error: string | null;
 }
 
-export interface AgentResponse {
+export type AgentResponse = {
   id: string;
   content: string;
   usage: {
@@ -40,4 +34,4 @@ export interface AgentResponse {
   };
   model: string;
   created_at: string;
-} 
+}; 

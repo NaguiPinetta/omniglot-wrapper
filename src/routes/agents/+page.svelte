@@ -1,96 +1,121 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { agentStore } from '../../stores/agents';
-  import { createAgent, updateAgent, deleteAgent, toggleAgentStatus } from '../../lib/agents/api';
   import { Button } from '$lib/components/ui/button';
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
   import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '$lib/components/ui/dialog';
   import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
   import type { AgentFormData, Agent } from '../../types/agents';
+  import type { PageData } from './$types';
+  import { modelStore } from '../../stores/models';
+  import type { Model } from '../../types/models';
 
-  let loading = false;
-  let error: string | null = null;
+  export let data: PageData;
+
   let editingAgent: Agent | null = null;
   let dialogOpen = false;
   let formData: AgentFormData = {
-    name: '',
-    description: '',
-    type: 'translator',
-    model: 'gpt-4',
+    custom_name: '',
+    prompt: 'You are a helpful assistant that translates text.',
+    model: '',
+    model_provider: 'openai',
     temperature: 0.7,
-    max_tokens: 1000,
-    system_prompt: '',
-    user_prompt_template: ''
+    top_p: 1.0
   };
 
-  const agentTypes = [
-    { value: 'translator', label: 'Translator' },
-    { value: 'reviewer', label: 'Reviewer' },
+  const modelProviders = [
+    { value: 'openai', label: 'OpenAI' },
+    { value: 'deepseek', label: 'DeepSeek' },
+    { value: 'mistral', label: 'Mistral' },
     { value: 'custom', label: 'Custom' }
   ];
 
-  const models = [
-    { value: 'gpt-4', label: 'GPT-4' },
-    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-    { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' }
-  ];
+  // Generate available providers based on saved API keys
+  $: availableProviders = $modelStore.apiKeys.length > 0 
+    ? $modelStore.apiKeys
+      .map(apiKey => apiKey.provider)
+      .filter((provider, index, arr) => arr.indexOf(provider) === index) // Remove duplicates
+      .map(provider => {
+        const providerConfig = modelProviders.find(p => p.value === provider);
+        return providerConfig || { value: provider, label: provider.charAt(0).toUpperCase() + provider.slice(1) };
+      })
+    : modelProviders; // Fallback to all providers if no API keys loaded yet
+
+  let availableModels: Model[] = [];
+  let loadingModels = false;
 
   onMount(() => {
-    agentStore.loadAgents();
+    // Initialize store with server-loaded data
+    console.log('onMount - received data:', data);
+    if (data.agents) {
+      console.log('Setting agents:', data.agents);
+      agentStore.setAgents(data.agents);
+    }
+    if (data.apiKeys) {
+      modelStore.setApiKeys(data.apiKeys);
+    }
+    if (data.models) {
+      modelStore.setModels(data.models);
+    }
+    if (data.error) {
+      agentStore.setError(data.error);
+    }
   });
 
-  async function handleSubmit() {
-    loading = true;
-    error = null;
+  // Reactive statement to keep formData in sync with agent store changes
+  $: if ($agentStore.agents.length > 0 && !editingAgent) {
+    // Reset formData when agents are updated and we're not editing
+    formData = {
+      custom_name: '',
+      prompt: 'You are a helpful assistant that translates text.',
+      model: '',
+      model_provider: 'openai',
+      temperature: 0.7,
+      top_p: 1.0
+    };
+  }
 
-    try {
-      if (editingAgent) {
-        const updatedAgent = await updateAgent(editingAgent.id, formData);
-        agentStore.updateAgent(updatedAgent);
-      } else {
-        const newAgent = await createAgent(formData);
-        agentStore.addAgent(newAgent);
+  async function handleSubmit() {
+    const dataToSubmit = {
+      ...formData,
+      temperature: Number(formData.temperature),
+      top_p: Number(formData.top_p)
+    };
+
+    if (editingAgent) {
+      await agentStore.updateAgent(editingAgent.id, dataToSubmit);
+      // Force a refresh of the agents data after successful update
+      if (!$agentStore.error) {
+        // The store should have already updated, but let's ensure UI reflects changes
+        editingAgent = null;
+        resetForm();
+        dialogOpen = false;
       }
-      resetForm();
-      dialogOpen = false;
-    } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to save agent';
-    } finally {
-      loading = false;
+    } else {
+      await agentStore.addAgent(dataToSubmit);
+      if (!$agentStore.error) {
+        resetForm();
+        dialogOpen = false;
+      }
     }
   }
 
   async function handleDelete(id: string) {
-    try {
-      await deleteAgent(id);
-      agentStore.removeAgent(id);
-    } catch (err) {
-      console.error('Failed to delete agent:', err);
-    }
-  }
-
-  async function handleToggleStatus(id: string, isActive: boolean) {
-    try {
-      const updatedAgent = await toggleAgentStatus(id, isActive);
-      agentStore.updateAgent(updatedAgent);
-    } catch (err) {
-      console.error('Failed to toggle agent status:', err);
+    if (confirm('Are you sure you want to delete this agent?')) {
+        await agentStore.deleteAgent(id);
     }
   }
 
   function editAgent(agent: Agent) {
     editingAgent = agent;
     formData = {
-      name: agent.name,
-      description: agent.description,
-      type: agent.type,
+      custom_name: agent.custom_name,
+      prompt: agent.prompt,
       model: agent.model,
+      model_provider: agent.model_provider,
       temperature: agent.temperature,
-      max_tokens: agent.max_tokens,
-      system_prompt: agent.system_prompt,
-      user_prompt_template: agent.user_prompt_template
+      top_p: agent.top_p,
     };
     dialogOpen = true;
   }
@@ -98,16 +123,64 @@
   function resetForm() {
     editingAgent = null;
     formData = {
-      name: '',
-      description: '',
-      type: 'translator',
-      model: 'gpt-4',
+      custom_name: '',
+      prompt: 'You are a helpful assistant that translates text.',
+      model: '',
+      model_provider: 'openai',
       temperature: 0.7,
-      max_tokens: 1000,
-      system_prompt: '',
-      user_prompt_template: ''
+      top_p: 1.0
     };
-    error = null;
+  }
+
+  // Modal state
+  let showCreateModal = false;
+
+  async function createAgent() {
+    try {
+      await agentStore.addAgent(formData);
+      showCreateModal = false;
+      resetForm();
+    } catch (error) {
+      console.error('Failed to create agent:', error);
+    }
+  }
+
+  async function updateAgent() {
+    if (!editingAgent) return;
+    try {
+      await agentStore.updateAgent(editingAgent.id, formData);
+      editingAgent = null;
+      dialogOpen = false;
+      resetForm();
+    } catch (error) {
+      console.error('Failed to update agent:', error);
+    }
+  }
+
+  // Helper functions for model filtering and display
+  function getAvailableModels(store: any) {
+    console.log('getAvailableModels called with store:', store);
+    if (!store.models || store.models.length === 0) {
+      console.log('No models in store');
+      return [];
+    }
+    
+    console.log('Store models count:', store.models.length);
+    // Temporarily show all models to fix the dropdown issue
+    const allModels = store.models.filter((model: any) => {
+      const isActive = model.is_active !== undefined ? model.is_active : true;
+      return isActive;
+    });
+    console.log('Available models count:', allModels.length);
+    return allModels;
+  }
+
+  function getModelDisplayName(model: any) {
+    const provider = model.provider.toUpperCase();
+    const tokens = model.context_length ? ` - ${model.context_length.toLocaleString()} tokens` : '';
+    
+    // Simplified display for now
+    return `${model.name} (${provider})${tokens}`;
   }
 </script>
 
@@ -127,214 +200,211 @@
             Configure and manage your AI translation agents
           </p>
         </div>
-        <Dialog bind:open={dialogOpen}>
-          <DialogTrigger asChild>
-            <Button on:click={resetForm}>Create Agent</Button>
-          </DialogTrigger>
-          <DialogContent class="sm:max-w-[600px]">
+        <!-- Always visible Create Agent button -->
+        <Button 
+          on:click={() => {
+            resetForm();
+            dialogOpen = true;
+          }}
+        >
+          Create Agent
+        </Button>
+      </div>
+    </div>
+
+    <!-- Dialog Modal -->
+    <Dialog bind:open={dialogOpen}>
+      <DialogContent class="sm:max-w-[600px]">
+        <div class="bg-white text-black rounded-lg">
             <DialogHeader>
-              <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create Agent'}</DialogTitle>
+              <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
             </DialogHeader>
-            <form on:submit|preventDefault={handleSubmit} class="space-y-4">
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium mb-1">Name</label>
-                  <Input
-                    type="text"
-                    placeholder="Agent Name"
-                    bind:value={formData.name}
-                    required
-                  />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium mb-1">Type</label>
-                  <select
-                    bind:value={formData.type}
-                    class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    {#each agentTypes as type}
-                      <option value={type.value}>{type.label}</option>
-                    {/each}
-                  </select>
-                </div>
-              </div>
-              
+            <form on:submit|preventDefault={handleSubmit} class="space-y-4 pt-4 p-6">
               <div>
-                <label class="block text-sm font-medium mb-1">Description</label>
+                  <label for="agent-name" class="block text-sm font-medium mb-1">Name</label>
+                  <input
+                    id="agent-name"
+                    type="text"
+                    placeholder="e.g., 'Spanish Marketing Translator'"
+                    bind:value={formData.custom_name}
+                    required
+                    minlength="1"
+                    class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  />
+
+              </div>
+
+              <div>
+                <label for="agent-prompt" class="block text-sm font-medium mb-1">System Prompt</label>
                 <Textarea
-                  placeholder="Agent description"
-                  bind:value={formData.description}
-                  rows={2}
+                  id="agent-prompt"
+                  placeholder="Define the agent's role and instructions."
+                  bind:value={formData.prompt}
+                  rows={5}
+                  required
                 />
+              </div>
+
+              <div class="grid grid-cols-1 gap-4">
+                <div>
+                  <label for="agent-model" class="block text-sm font-medium mb-1">Model</label>
+                  <select
+                    id="agent-model"
+                    bind:value={formData.model}
+                    on:change={(e) => {
+                      const target = e.target as HTMLSelectElement;
+                      const selectedModel = $modelStore.models.find(m => m.name === target.value);
+                      if (selectedModel) {
+                        formData.model_provider = selectedModel.provider as Agent['model_provider'];
+                      }
+                    }}
+                    class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    required
+                  >
+                    <option value="">Select a model</option>
+                    {#if $modelStore.loading}
+                      <option disabled>Loading models...</option>
+                    {:else if getAvailableModels($modelStore).length === 0}
+                      <option disabled>No models available - Add API keys first</option>
+                    {:else}
+                      {#each getAvailableModels($modelStore) as model}
+                        <option value={model.name}>
+                          {getModelDisplayName(model)}
+                        </option>
+                      {/each}
+                    {/if}
+                  </select>
+                  <p class="text-xs text-gray-500 mt-1">
+                    🔑 API Key Required • 🆓 Free Models • 🎯 Demo Models • 🌐 Gateway Models<br/>
+                    <a href="/models" class="text-blue-600 hover:text-blue-700 underline">Manage API keys & models</a>
+                  </p>
+                </div>
               </div>
 
               <div class="grid grid-cols-2 gap-4">
                 <div>
-                  <label class="block text-sm font-medium mb-1">Model</label>
-                  <select
-                    bind:value={formData.model}
-                    class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    {#each models as model}
-                      <option value={model.value}>{model.label}</option>
-                    {/each}
-                  </select>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium mb-1">Temperature</label>
+                  <label for="agent-temperature" class="block text-sm font-medium mb-1">
+                    Temperature
+                    <span class="text-xs text-gray-500 font-normal">(0.0 - 2.0)</span>
+                  </label>
                   <Input
+                    id="agent-temperature"
                     type="number"
                     min="0"
                     max="2"
                     step="0.1"
-                    bind:value={formData.temperature}
+                    bind:valueAsNumber={formData.temperature}
                   />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Controls randomness: 0 = focused, 1 = balanced, 2 = creative
+                  </p>
+                </div>
+                <div>
+                  <label for="agent-top-p" class="block text-sm font-medium mb-1">
+                    Top P
+                    <span class="text-xs text-gray-500 font-normal">(0.0 - 1.0)</span>
+                  </label>
+                  <Input
+                    id="agent-top-p"
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    bind:valueAsNumber={formData.top_p}
+                  />
+                  <p class="text-xs text-gray-500 mt-1">
+                    Controls diversity: 0.1 = focused, 1.0 = all options
+                  </p>
                 </div>
               </div>
 
-              <div>
-                <label class="block text-sm font-medium mb-1">Max Tokens</label>
-                <Input
-                  type="number"
-                  min="1"
-                  bind:value={formData.max_tokens}
-                />
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium mb-1">System Prompt</label>
-                <Textarea
-                  placeholder="System prompt for the agent"
-                  bind:value={formData.system_prompt}
-                  rows={3}
-                />
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium mb-1">User Prompt Template</label>
-                <Textarea
-                  placeholder="Template for user prompts (use {input} for placeholder)"
-                  bind:value={formData.user_prompt_template}
-                  rows={3}
-                />
-              </div>
-
-              {#if error}
-                <p class="text-red-500 text-sm">{error}</p>
+              {#if $agentStore.error}
+                <p class="text-red-500 text-sm">Error: {$agentStore.error}</p>
               {/if}
 
-              <div class="flex justify-end gap-2">
-                <Button variant="outline" on:click={() => dialogOpen = false}>
+              <div class="flex justify-end gap-2 pt-4">
+                <Button variant="secondary" type="button" on:click={() => dialogOpen = false}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={loading}>
-                  {loading ? 'Saving...' : (editingAgent ? 'Update' : 'Create')}
+                <Button type="submit" disabled={$agentStore.loading}>
+                  {$agentStore.loading ? 'Saving...' : (editingAgent ? 'Save Changes' : 'Create Agent')}
                 </Button>
               </div>
             </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     <!-- Loading State -->
-    {#if error}
-      <div class="mt-4 bg-red-50 border border-red-200 rounded-md p-4 text-red-700">
-        {error}
-      </div>
-    {:else if loading}
-      <div class="text-center py-4">
-        <div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent"></div>
-        <p class="mt-2 text-sm text-gray-500">Loading agents...</p>
-      </div>
+    {#if $agentStore.loading && $agentStore.agents.length === 0}
+        <div class="text-center py-4">
+            <div class="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent"></div>
+            <p class="mt-2 text-sm text-gray-500">Loading agents...</p>
+        </div>
+    {:else if $agentStore.error}
+        <div class="mt-4 bg-red-50 border border-red-200 rounded-md p-4 text-red-700 mb-6">
+            <div class="flex items-center">
+                <svg class="w-5 h-5 text-red-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+                </svg>
+                <div>
+                    <h3 class="text-sm font-medium text-red-800">Connection Error</h3>
+                    <p class="text-sm text-red-700 mt-1">{$agentStore.error}</p>
+                    <p class="text-sm text-red-600 mt-2">You can still create agents - they will be saved once the connection is restored.</p>
+                </div>
+            </div>
+        </div>
+        <!-- Show empty state even with error so user can still interact -->
+        <div class="text-center py-12">
+            <h3 class="mt-2 text-lg font-medium text-gray-900">No Agents Configured</h3>
+            <p class="mt-1 text-sm text-gray-500">
+                Get started by creating your first AI translation agent.
+            </p>
+            <div class="mt-6">
+                <Button on:click={() => dialogOpen = true}>Create Agent</Button>
+            </div>
+        </div>
     {:else if $agentStore.agents.length === 0}
       <!-- Empty State -->
       <div class="text-center py-12">
-        <div class="mx-auto h-12 w-12 text-gray-400">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-        </div>
-        <h3 class="mt-2 text-sm font-medium text-gray-900">No agents configured</h3>
+        <h3 class="mt-2 text-lg font-medium text-gray-900">No Agents Configured</h3>
         <p class="mt-1 text-sm text-gray-500">
           Get started by creating your first AI translation agent.
         </p>
         <div class="mt-6">
-          <Button
-            on:click={resetForm}
-            class="inline-flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
-          >
-            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            Add Agent
-          </Button>
+            <Button on:click={() => dialogOpen = true}>Create Agent</Button>
         </div>
       </div>
     {:else}
-      <!-- Agents Grid -->
-      <div class="mt-8 grid gap-6">
+      <!-- Agent Cards -->
+      <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {#each $agentStore.agents as agent (agent.id)}
-          <Card>
+          <Card class="flex flex-col">
             <CardHeader>
-              <div class="flex justify-between items-start">
-                <div>
-                  <CardTitle class="flex items-center gap-2">
-                    {agent.name}
-                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {agent.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}">
-                      {agent.is_active ? 'Active' : 'Inactive'}
+                <div class="flex justify-between items-start">
+                    <CardTitle class="text-lg font-semibold text-gray-900">
+                      {agent.custom_name || 'Unnamed Agent'}
+                    </CardTitle>
+                    <span class="text-xs font-semibold px-2 py-1 rounded-full bg-purple-100 text-purple-800 capitalize">
+                        {agent.model}
                     </span>
-                  </CardTitle>
-                  <CardDescription>{agent.description}</CardDescription>
                 </div>
-                <div class="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    on:click={() => handleToggleStatus(agent.id, !agent.is_active)}
-                  >
-                    {agent.is_active ? 'Deactivate' : 'Activate'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    on:click={() => editAgent(agent)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    on:click={() => handleDelete(agent.id)}
-                  >
-                    Delete
-                  </Button>
+                <div class="text-sm text-gray-500 mt-1">
+                  Model: <span class="font-medium text-gray-700">{agent.model}</span>
                 </div>
-              </div>
             </CardHeader>
-            <CardContent>
-              <div class="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p class="font-medium">Type</p>
-                  <p class="text-gray-600 capitalize">{agent.type}</p>
-                </div>
-                <div>
-                  <p class="font-medium">Model</p>
-                  <p class="text-gray-600">{agent.model}</p>
-                </div>
-                <div>
-                  <p class="font-medium">Temperature</p>
-                  <p class="text-gray-600">{agent.temperature}</p>
-                </div>
-                <div>
-                  <p class="font-medium">Max Tokens</p>
-                  <p class="text-gray-600">{agent.max_tokens}</p>
-                </div>
-              </div>
+            <CardContent class="flex-grow">
+              <p class="text-sm text-gray-600 line-clamp-3" title={agent.prompt}>
+                {agent.prompt}
+              </p>
             </CardContent>
-            <CardFooter>
-              <div class="text-sm text-gray-500">
-                Created {new Date(agent.created_at).toLocaleDateString()}
+            <CardFooter class="flex justify-between items-center">
+                <div class="text-sm text-gray-500">
+                    Provider: <span class="font-medium text-gray-700 capitalize">{agent.model_provider}</span>
+                </div>
+              <div class="flex gap-2">
+                <Button variant="secondary" size="sm" on:click={() => editAgent(agent)}>Edit</Button>
+                <Button variant="danger" size="sm" on:click={() => handleDelete(agent.id)}>Delete</Button>
               </div>
             </CardFooter>
           </Card>

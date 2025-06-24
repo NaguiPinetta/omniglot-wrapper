@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import type { Agent, AgentStore } from '../types/agents';
-import { getAgents } from '../lib/agents/api';
+import { getAgents, createAgent, updateAgent, deleteAgent } from '../lib/agents/api';
 
 // Store for the currently selected agent
 export const selectedAgent = writable<Agent | null>(null);
@@ -11,72 +11,105 @@ export const glossaryEnabled = writable<boolean>(false);
 // Store for all available agents
 export const agents = writable<Agent[]>([]);
 
-function createAgentStore() {
-  const { subscribe, set, update } = writable<AgentStore>({
+const initialState: AgentStore = {
     agents: [],
     loading: false,
     error: null
-  });
+};
+
+function createAgentStore() {
+	const { subscribe, set, update } = writable<AgentStore>(initialState);
 
   return {
     subscribe,
     
-    // Load all agents
     async loadAgents() {
       update(state => ({ ...state, loading: true, error: null }));
       try {
         const agents = await getAgents();
-        update(state => ({ ...state, agents }));
+				update(state => ({ ...state, agents, loading: false }));
       } catch (error) {
-        update(state => ({ ...state, error: error instanceof Error ? error.message : 'Failed to load agents' }));
-      } finally {
-        update(state => ({ ...state, loading: false }));
+				const errorMessage = error instanceof Error ? error.message : 'Failed to load agents';
+				update(state => ({ ...state, loading: false, error: errorMessage }));
       }
     },
 
-    // Add a new agent
-    addAgent(agent: Agent) {
+		async addAgent(agentData: Omit<Agent, 'id' | 'created_at'>) {
+			console.log('addAgent called with:', agentData);
+			update(state => ({ ...state, loading: true, error: null }));
+			try {
+				const newAgent = await createAgent(agentData);
+				console.log('createAgent returned:', newAgent);
       update(state => ({
         ...state,
-        agents: [agent, ...state.agents]
+					agents: [newAgent, ...state.agents],
+					loading: false
       }));
-    },
+			} catch (error) {
+				console.error('addAgent error:', error);
+				const errorMessage = error instanceof Error ? error.message : 'Failed to create agent';
+				update(state => ({ ...state, loading: false, error: errorMessage }));
+			}
+		},
 
-    // Update an existing agent
-    updateAgent(updatedAgent: Agent) {
+		async updateAgent(id: string, agentData: Partial<Agent>) {
+			update(state => ({ ...state, loading: true, error: null }));
+			try {
+				const updatedAgent = await updateAgent(id, agentData);
       update(state => ({
         ...state,
-        agents: state.agents.map(a => 
-          a.id === updatedAgent.id ? updatedAgent : a
-        )
+					agents: state.agents.map(a => a.id === id ? updatedAgent : a),
+					loading: false
       }));
-    },
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : 'Failed to update agent';
+				update(state => ({ ...state, loading: false, error: errorMessage }));
+			}
+		},
 
-    // Remove an agent
-    removeAgent(id: string) {
+		async deleteAgent(id: string) {
+			update(state => ({ ...state, loading: true, error: null }));
+			try {
+				await deleteAgent(id);
       update(state => ({
         ...state,
-        agents: state.agents.filter(a => a.id !== id)
+					agents: state.agents.filter(a => a.id !== id),
+					loading: false
       }));
-    },
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : 'Failed to delete agent';
+				update(state => ({ ...state, loading: false, error: errorMessage }));
+			}
+		},
 
-    // Toggle agent status
-    toggleAgentStatus(id: string, isActive: boolean) {
-      update(state => ({
-        ...state,
-        agents: state.agents.map(a => 
-          a.id === id ? { ...a, is_active: isActive } : a
-        )
-      }));
-    },
+		// Commented out since is_active field doesn't exist in database
+		// async toggleAgentStatus(id: string, isActive: boolean) {
+		// 	update(state => ({ ...state, loading: true, error: null }));
+		// 	try {
+		// 		await toggleAgentStatus(id, isActive);
+		// 		update(state => ({
+		// 			...state,
+		// 			agents: state.agents.map(a =>
+		// 				a.id === id ? { ...a, is_active: isActive } : a
+		// 			),
+		// 			loading: false
+		// 		}));
+		// 	} catch (error) {
+		// 		const errorMessage = error instanceof Error ? error.message : 'Failed to toggle agent status';
+		// 		update(state => ({ ...state, loading: false, error: errorMessage }));
+		// 	}
+		// },
 
-    // Reset the store
-    reset() {
-      set({
-        agents: [],
-        loading: false,
-        error: null
-      });
+		clearError() {
+			update(state => ({ ...state, error: null }));
+		},
+
+		setAgents(agents: Agent[]) {
+			update(state => ({ ...state, agents, error: null }));
+		},
+
+		setError(error: string) {
+			update(state => ({ ...state, error }));
     }
   };
 }
@@ -101,23 +134,19 @@ export const agentActions = {
     agents.set(agentList);
   },
 
-  addAgent: (agent: Agent) => {
-    agentStore.addAgent(agent);
+  createAgent: async (agent: Omit<Agent, 'id' | 'created_at'>) => {
+    await agentStore.addAgent(agent);
   },
 
-  updateAgent: (updatedAgent: Agent) => {
-    agentStore.updateAgent(updatedAgent);
+  updateAgent: async (id: string, agent: Partial<Agent>) => {
+    await agentStore.updateAgent(id, agent);
   },
 
-  deleteAgent: (id: string) => {
-    agentStore.removeAgent(id);
-  },
-
-  toggleAgentStatus: (id: string, isActive: boolean) => {
-    agentStore.toggleAgentStatus(id, isActive);
+  deleteAgent: async (id: string) => {
+    await agentStore.deleteAgent(id);
   },
 
   reset: () => {
-    agentStore.reset();
+    agentStore.clearError();
   }
 }; 

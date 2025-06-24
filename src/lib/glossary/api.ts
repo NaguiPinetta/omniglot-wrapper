@@ -1,72 +1,52 @@
 import { supabaseClient } from '../supabaseClient';
-import type { GlossaryEntry, GlossaryFormData } from '../../types/glossary';
+import type { GlossaryEntry } from '../../types/glossary';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-export async function getGlossary(): Promise<GlossaryEntry[]> {
-  const { data, error } = await supabaseClient
-    .from('glossary_terms')
-    .select('*')
-    .order('term', { ascending: true });
-  
-  if (error) throw error;
-  return data ?? [];
+export async function getGlossaryEntries({
+	client = supabaseClient
+}: { client?: SupabaseClient } = {}): Promise<GlossaryEntry[]> {
+	const { data, error } = await client.from('glossary').select('*');
+	if (error) throw error;
+	return data ?? [];
 }
 
-export async function addGlossaryEntry(entry: GlossaryFormData): Promise<GlossaryEntry> {
-  const { data, error } = await supabaseClient
-    .from('glossary_terms')
-    .insert([{
-      source_term: entry.term,
-      target_term: entry.translation,
-      note: entry.note,
-      context: entry.context,
-      language: entry.language || 'es'
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return {
-    id: data.id,
-    term: data.source_term,
-    translation: data.target_term,
-    note: data.note,
-    context: data.context,
-    language: data.language,
-    created_at: data.created_at
-  };
+export async function createGlossaryEntry(
+	entry: Omit<GlossaryEntry, 'id' | 'created_at'>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<GlossaryEntry> {
+	const { data, error } = await client.from('glossary').insert([entry]).select().single();
+	if (error) throw error;
+	return data;
 }
 
-export async function updateGlossaryEntry(id: string, updates: GlossaryFormData): Promise<void> {
-  const { error } = await supabaseClient
-    .from('glossary_terms')
-    .update({
-      source_term: updates.term,
-      target_term: updates.translation,
-      note: updates.note,
-      context: updates.context,
-      language: updates.language
-    })
-    .eq('id', id);
-
-  if (error) throw error;
+export async function updateGlossaryEntry(
+	id: string,
+	entry: Partial<GlossaryEntry>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<GlossaryEntry> {
+	const { data, error } = await client.from('glossary').update(entry).eq('id', id).select().single();
+	if (error) throw error;
+	return data;
 }
 
-export async function deleteGlossaryEntry(id: string): Promise<void> {
-  const { error } = await supabaseClient
-    .from('glossary_terms')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
+export async function deleteGlossaryEntry(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	const { error } = await client.from('glossary').delete().eq('id', id);
+	if (error) throw error;
 }
 
-export async function updateLastUsed(id: string): Promise<void> {
-  const { error } = await supabaseClient
-    .from('glossary_terms')
-    .update({
-      last_used: new Date().toISOString()
-    })
-    .eq('id', id);
+export async function updateLastUsed(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	const { error } = await client
+		.from('glossary_terms')
+		.update({
+			last_used: new Date().toISOString()
+		})
+		.eq('id', id);
 
-  if (error) throw error;
+	if (error) throw error;
 } 

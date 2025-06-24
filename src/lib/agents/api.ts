@@ -1,87 +1,93 @@
 import { supabaseClient } from '../supabaseClient';
 import type { Agent, AgentFormData, AgentResponse } from '../../types/agents';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-export async function getAgents(): Promise<Agent[]> {
-  const { data, error } = await supabaseClient
-    .from('agents')
-    .select('*')
-    .order('created_at', { ascending: false });
+export async function getAgents({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Agent[]> {
+	const { data, error } = await client.from('agents').select('*');
+  if (error) throw error;
+	return data ?? [];
+}
+
+export async function getAgent(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Agent> {
+	const { data, error } = await client.from('agents').select('*').eq('id', id).single();
 
   if (error) throw error;
   return data;
 }
 
-export async function getAgent(id: string): Promise<Agent> {
-  const { data, error } = await supabaseClient
-    .from('agents')
-    .select('*')
-    .eq('id', id)
-    .single();
-
+export async function createAgent(
+	agent: Omit<Agent, 'id' | 'created_at'>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Agent> {
+	console.log('createAgent API called with:', agent);
+	const { data, error } = await client.from('agents').insert([agent]).select().single();
+	console.log('createAgent API - data:', data);
+	console.log('createAgent API - error:', error);
   if (error) throw error;
   return data;
 }
 
-export async function createAgent(formData: AgentFormData): Promise<Agent> {
-  const { data, error } = await supabaseClient
-    .from('agents')
-    .insert([{
-      ...formData,
-      is_active: true
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+export async function updateAgent(
+	id: string,
+	agent: Partial<Agent>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Agent> {
+	const { data, error } = await client
+		.from('agents')
+		.update(agent)
+		.eq('id', id)
+		.select('*')
+		.single();
+	if (error) throw error;
+	return data;
 }
 
-export async function updateAgent(id: string, updates: Partial<AgentFormData>): Promise<Agent> {
-  const { data, error } = await supabaseClient
-    .from('agents')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
-}
-
-export async function deleteAgent(id: string): Promise<void> {
-  const { error } = await supabaseClient
-    .from('agents')
-    .delete()
-    .eq('id', id);
-
+export async function deleteAgent(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	const { error } = await client.from('agents').delete().eq('id', id);
   if (error) throw error;
 }
 
-export async function toggleAgentStatus(id: string, isActive: boolean): Promise<Agent> {
-  const { data, error } = await supabaseClient
-    .from('agents')
-    .update({ is_active: isActive })
-    .eq('id', id)
-    .select()
-    .single();
+// Commented out since is_active field doesn't exist in database
+// export async function toggleAgentStatus(
+// 	id: string,
+// 	isActive: boolean,
+// 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+// ): Promise<Agent> {
+// 	const { data, error } = await client
+// 		.from('agents')
+// 		.update({ is_active: isActive })
+// 		.eq('id', id)
+// 		.select()
+// 		.single();
 
-  if (error) throw error;
-  return data;
-}
+// 	if (error) throw error;
+// 	return data;
+// }
 
-export async function executeAgent(agentId: string, input: string): Promise<AgentResponse> {
+export async function executeAgent(
+	agentId: string,
+	input: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<AgentResponse> {
   // First get the agent configuration
-  const agent = await getAgent(agentId);
+	const agent = await getAgent(agentId, { client });
   
-  if (!agent.is_active) {
-    throw new Error('Agent is not active');
-  }
+	// Removed is_active check since field doesn't exist
+	// if (!agent.is_active) {
+	// 	throw new Error('Agent is not active');
+	// }
 
   // Here you would typically make a call to your AI service (OpenAI, Anthropic, etc.)
   // For now, we'll simulate the response
   const response: AgentResponse = {
     id: crypto.randomUUID(),
-    content: `Simulated response from ${agent.name}: ${input}`,
+    content: `Simulated response from ${agent.custom_name}: ${input}`,
     usage: {
       prompt_tokens: input.length,
       completion_tokens: 50,
@@ -94,8 +100,8 @@ export async function executeAgent(agentId: string, input: string): Promise<Agen
   return response;
 }
 
-export async function testConnection() {
-  const { data, error } = await supabaseClient.from('agents').select('*').limit(1);
+export async function testConnection({ client = supabaseClient }: { client?: SupabaseClient } = {}) {
+	const { data, error } = await client.from('agents').select('*').limit(1);
   if (error) console.error('❌ Supabase error:', error.message);
   else console.log('✅ Supabase connected. Example data:', data);
 } 

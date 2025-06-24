@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { env } from '$env/dynamic/public';
 
 export const supabaseClient = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
+	env.PUBLIC_SUPABASE_URL!,
+	env.PUBLIC_SUPABASE_ANON_KEY!
 );
 
 // Types based on your schema

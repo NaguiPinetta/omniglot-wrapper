@@ -1,176 +1,158 @@
 import { supabaseClient } from '../supabaseClient';
-import type { Job, JobFormData, JobResult, JobProgress } from '../../types/jobs';
+import type { Job, JobFormData, JobResult } from '../../types/jobs';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { executeAgent } from '../agents/api';
 import { getDataset } from '../datasets/api';
 
-export async function getJobs(): Promise<Job[]> {
-  const { data, error } = await supabaseClient
-    .from('jobs')
-    .select('*')
-    .order('created_at', { ascending: false });
+// --- Database CRUD Functions ---
 
-  if (error) throw error;
-  return data;
+export async function getJobs({
+	client = supabaseClient
+}: { client?: SupabaseClient } = {}): Promise<Job[]> {
+	const { data, error } = await client.from('jobs').select('*').order('created_at', { ascending: false });
+	if (error) throw error;
+	return data ?? [];
 }
 
-export async function getJob(id: string): Promise<Job> {
-  const { data, error } = await supabaseClient
-    .from('jobs')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) throw error;
-  return data;
+export async function getJob(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Job> {
+	const { data, error } = await client.from('jobs').select('*').eq('id', id).single();
+	if (error) throw error;
+	return data;
 }
 
-export async function createJob(formData: JobFormData): Promise<Job> {
-  const { data, error } = await supabaseClient
-    .from('jobs')
-    .insert([{
-      ...formData,
-      status: 'pending',
-      progress: 0,
-      total_items: 0,
-      processed_items: 0,
-      failed_items: 0
-    }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+export async function createJob(
+	job: Omit<Job, 'id' | 'created_at'>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Job> {
+	const { data, error } = await client.from('jobs').insert([job]).select().single();
+	if (error) throw error;
+	return data;
 }
 
-export async function updateJob(id: string, updates: Partial<Job>): Promise<Job> {
-  const { data, error } = await supabaseClient
-    .from('jobs')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+export async function updateJob(
+	id: string,
+	updates: Partial<Job>,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Job> {
+	const { data, error } = await client.from('jobs').update(updates).eq('id', id).select().single();
+	if (error) throw error;
+	return data;
 }
 
-export async function deleteJob(id: string): Promise<void> {
-  const { error } = await supabaseClient
-    .from('jobs')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
+export async function deleteJob(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	// Related job_results are deleted via cascading delete in Supabase
+	const { error } = await client.from('jobs').delete().eq('id', id);
+	if (error) throw error;
 }
 
-export async function startJob(id: string): Promise<Job> {
-  // Get the job details
-  const job = await getJob(id);
-  
-  if (job.status !== 'pending') {
-    throw new Error('Job is not in pending status');
-  }
-
-  // Update job status to running
-  const updatedJob = await updateJob(id, {
-    status: 'running',
-    started_at: new Date().toISOString()
-  });
-
-  // Start the translation process in the background
-  processJobInBackground(id);
-
-  return updatedJob;
+export async function getJobResults(
+	jobId: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<JobResult[]> {
+	const { data, error } = await client.from('job_results').select('*').eq('job_id', jobId).order('created_at', { ascending: true });
+	if (error) throw error;
+	return data ?? [];
 }
 
-export async function cancelJob(id: string): Promise<Job> {
-  return await updateJob(id, {
-    status: 'cancelled',
-    completed_at: new Date().toISOString()
-  });
+// --- Job Execution Logic ---
+
+export async function startJob(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Job> {
+	const job = await getJob(id, { client });
+	if (job.status !== 'pending') {
+		throw new Error('Job is not in pending status');
+	}
+
+	const updatedJob = await updateJob(id, {
+		status: 'running',
+		started_at: new Date().toISOString()
+	}, { client });
+
+	// Process job in the background (fire and forget)
+	processJobInBackground(id, { client });
+
+	return updatedJob;
 }
 
-export async function getJobResults(jobId: string): Promise<JobResult[]> {
-  const { data, error } = await supabaseClient
-    .from('job_results')
-    .select('*')
-    .eq('job_id', jobId)
-    .order('created_at', { ascending: true });
-
-  if (error) throw error;
-  return data;
+export async function cancelJob(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Job> {
+	return await updateJob(id, {
+		status: 'cancelled',
+		completed_at: new Date().toISOString()
+	}, { client });
 }
 
-async function processJobInBackground(jobId: string) {
-  try {
-    const job = await getJob(jobId);
-    const dataset = await getDataset(job.dataset_id);
-    
-    // Simulate processing dataset rows
-    const totalRows = dataset.row_count;
-    let processed = 0;
-    let failed = 0;
+async function processJobInBackground(
+	jobId: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+) {
+	try {
+		let job = await getJob(jobId, { client });
+		const dataset = await getDataset(job.dataset_id, { client });
+		
+		// This is a placeholder for getting the actual dataset content.
+		// In a real app, you'd fetch the file from storage and parse it.
+		const mockDatasetContent = Array.from({ length: dataset.row_count }, (_, i) => ({
+			source_text: `Sample row ${i + 1} for ${dataset.name}`
+		}));
 
-    // Update job with total items
-    await updateJob(jobId, { total_items: totalRows });
+		await updateJob(jobId, { total_items: mockDatasetContent.length }, { client });
 
-    // Process each row (simulated)
-    for (let i = 0; i < totalRows; i++) {
-      // Check if job was cancelled
-      const currentJob = await getJob(jobId);
-      if (currentJob.status === 'cancelled') {
-        break;
-      }
+		for (let i = 0; i < mockDatasetContent.length; i++) {
+			// Re-fetch job to check for cancellation
+			job = await getJob(jobId, { client });
+			if (job.status === 'cancelled') break;
 
-      try {
-        // Simulate translation
-        const sourceText = `Sample text ${i + 1}`;
-        const response = await executeAgent(job.agent_id, sourceText);
-        
-        // Save result
-        await supabaseClient
-          .from('job_results')
-          .insert([{
-            job_id: jobId,
-            source_text: sourceText,
-            translated_text: response.content,
-            confidence: 0.95,
-            processing_time: 1.2
-          }]);
+			try {
+				const item = mockDatasetContent[i];
+				// In a real app, you would map a specific column here.
+				const sourceText = item.source_text;
+				const response = await executeAgent(job.agent_id, sourceText, { client });
+				
+				await client.from('job_results').insert([{
+					job_id: jobId,
+					source_text: sourceText,
+					translated_text: response.content,
+					// Other result fields would be populated here
+				}]);
 
-        processed++;
-      } catch (error) {
-        failed++;
-        console.error(`Failed to process item ${i + 1}:`, error);
-      }
+				await updateJob(jobId, { processed_items: i + 1, progress: Math.round(((i + 1) / mockDatasetContent.length) * 100) }, { client });
 
-      // Update progress every 10 items
-      if (i % 10 === 0 || i === totalRows - 1) {
-        const progress = Math.round((processed / totalRows) * 100);
-        await updateJob(jobId, {
-          processed_items: processed,
-          failed_items: failed,
-          progress
-        });
-      }
+			} catch (error) {
+				console.error(`Failed to process item ${i + 1}:`, error);
+				await updateJob(jobId, { failed_items: (job.failed_items || 0) + 1 }, { client });
+			}
 
-      // Simulate processing time
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+			// Simulate processing time
+			await new Promise(resolve => setTimeout(resolve, 50));
+		}
 
-    // Mark job as completed
-    await updateJob(jobId, {
-      status: 'completed',
-      completed_at: new Date().toISOString(),
-      progress: 100
-    });
+		// Final job status update
+		job = await getJob(jobId, { client }); // Re-fetch final state
+		if (job.status !== 'cancelled') {
+			await updateJob(jobId, {
+				status: 'completed',
+				completed_at: new Date().toISOString(),
+				progress: 100
+			}, { client });
+		}
 
-  } catch (error) {
-    console.error('Job processing failed:', error);
-    await updateJob(jobId, {
-      status: 'failed',
-      error_message: error instanceof Error ? error.message : 'Unknown error',
-      completed_at: new Date().toISOString()
-    });
-  }
+	} catch (error) {
+		console.error('Job processing failed:', error);
+		await updateJob(jobId, {
+			status: 'failed',
+			error_message: error instanceof Error ? error.message : 'Unknown error',
+			completed_at: new Date().toISOString()
+		}, { client });
+	}
 } 

@@ -3,7 +3,6 @@
 	import { jobStore } from '../../stores/jobs';
 	import { agentStore } from '../../stores/agents';
 	import { datasetStore } from '../../stores/datasets';
-	import { createJob, startJob, cancelJob, deleteJob } from '../../lib/jobs/api';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -11,8 +10,6 @@
 	import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import type { JobFormData, Job } from '../../types/jobs';
 
-	let loading = false;
-	let error: string | null = null;
 	let dialogOpen = false;
 	let formData: JobFormData = {
 		name: '',
@@ -43,45 +40,10 @@
 	});
 
 	async function handleSubmit() {
-		loading = true;
-		error = null;
-
-		try {
-			const newJob = await createJob(formData);
-			jobStore.addJob(newJob);
+		await jobStore.addJob(formData);
+		if (!$jobStore.error) {
 			resetForm();
 			dialogOpen = false;
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create job';
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function handleStartJob(id: string) {
-		try {
-			const updatedJob = await startJob(id);
-			jobStore.updateJob(updatedJob);
-		} catch (err) {
-			console.error('Failed to start job:', err);
-		}
-	}
-
-	async function handleCancelJob(id: string) {
-		try {
-			const updatedJob = await cancelJob(id);
-			jobStore.updateJob(updatedJob);
-		} catch (err) {
-			console.error('Failed to cancel job:', err);
-		}
-	}
-
-	async function handleDeleteJob(id: string) {
-		try {
-			await deleteJob(id);
-			jobStore.removeJob(id);
-		} catch (err) {
-			console.error('Failed to delete job:', err);
 		}
 	}
 
@@ -94,7 +56,6 @@
 			agent_id: '',
 			dataset_id: ''
 		};
-		error = null;
 	}
 
 	function getStatusColor(status: Job['status']) {
@@ -126,36 +87,36 @@
 </svelte:head>
 
 <main class="container mx-auto px-4 py-8">
-	<h1 class="text-3xl font-bold mb-6">Job Manager</h1>
-	<p class="text-gray-600">Monitor and manage translation jobs</p>
-</main>
-
-<div class="container mx-auto py-8">
 	<div class="flex justify-between items-center mb-8">
-		<h1 class="text-3xl font-bold">Translation Jobs</h1>
+		<div class="flex-1">
+			<h1 class="text-3xl font-bold">Translation Jobs</h1>
+			<p class="text-gray-600">Monitor and manage translation jobs</p>
+		</div>
 		<Dialog bind:open={dialogOpen}>
 			<DialogTrigger asChild>
 				<Button on:click={resetForm}>Create Job</Button>
 			</DialogTrigger>
 			<DialogContent class="sm:max-w-[600px]">
 				<DialogHeader>
-					<DialogTitle>Create Translation Job</DialogTitle>
+					<DialogTitle>Create New Translation Job</DialogTitle>
 				</DialogHeader>
-				<form on:submit|preventDefault={handleSubmit} class="space-y-4">
+				<form on:submit|preventDefault={handleSubmit} class="space-y-4 pt-4">
 					<div>
-						<label class="block text-sm font-medium mb-1">Job Name</label>
+						<label for="job-name" class="block text-sm font-medium mb-1">Job Name</label>
 						<Input
+							id="job-name"
 							type="text"
-							placeholder="Job Name"
+							placeholder="e.g., 'Translate Italian Marketing Copy'"
 							bind:value={formData.name}
 							required
 						/>
 					</div>
 					
 					<div>
-						<label class="block text-sm font-medium mb-1">Description</label>
+						<label for="job-description" class="block text-sm font-medium mb-1">Description</label>
 						<Textarea
-							placeholder="Job description"
+							id="job-description"
+							placeholder="A brief description of this translation job."
 							bind:value={formData.description}
 							rows={2}
 						/>
@@ -163,8 +124,9 @@
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Source Language</label>
+							<label for="source-lang" class="block text-sm font-medium mb-1">Source Language</label>
 							<select
+								id="source-lang"
 								bind:value={formData.source_language}
 								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
 							>
@@ -174,8 +136,9 @@
 							</select>
 						</div>
 						<div>
-							<label class="block text-sm font-medium mb-1">Target Language</label>
+							<label for="target-lang" class="block text-sm font-medium mb-1">Target Language</label>
 							<select
+								id="target-lang"
 								bind:value={formData.target_language}
 								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
 							>
@@ -188,26 +151,28 @@
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium mb-1">Agent</label>
+							<label for="agent" class="block text-sm font-medium mb-1">Agent</label>
 							<select
+								id="agent"
 								bind:value={formData.agent_id}
 								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
 								required
 							>
-								<option value="">Select an agent</option>
+								<option value="" disabled>Select an agent</option>
 								{#each $agentStore.agents as agent}
 									<option value={agent.id}>{agent.name}</option>
 								{/each}
 							</select>
 						</div>
 						<div>
-							<label class="block text-sm font-medium mb-1">Dataset</label>
+							<label for="dataset" class="block text-sm font-medium mb-1">Dataset</label>
 							<select
+								id="dataset"
 								bind:value={formData.dataset_id}
 								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
 								required
 							>
-								<option value="">Select a dataset</option>
+								<option value="" disabled>Select a dataset</option>
 								{#each $datasetStore.datasets as dataset}
 									<option value={dataset.id}>{dataset.name}</option>
 								{/each}
@@ -215,16 +180,16 @@
 						</div>
 					</div>
 
-					{#if error}
-						<p class="text-red-500 text-sm">{error}</p>
+					{#if $jobStore.error}
+						<p class="text-red-500 text-sm">Error: {$jobStore.error}</p>
 					{/if}
 
-					<div class="flex justify-end gap-2">
-						<Button variant="outline" on:click={() => dialogOpen = false}>
+					<div class="flex justify-end gap-2 pt-4">
+						<Button variant="outline" type="button" on:click={() => dialogOpen = false}>
 							Cancel
 						</Button>
-						<Button type="submit" disabled={loading}>
-							{loading ? 'Creating...' : 'Create Job'}
+						<Button type="submit" disabled={$jobStore.loading}>
+							{$jobStore.loading ? 'Creating...' : 'Create Job'}
 						</Button>
 					</div>
 				</form>
@@ -232,110 +197,67 @@
 		</Dialog>
 	</div>
 
-	{#if $jobStore.loading}
-		<div class="flex justify-center">
+	{#if $jobStore.loading && $jobStore.jobs.length === 0}
+		<div class="text-center py-8">
 			<p>Loading jobs...</p>
-		</div>
-	{:else if $jobStore.error}
-		<div class="text-red-500">
-			<p>Error: {$jobStore.error}</p>
 		</div>
 	{:else if $jobStore.jobs.length === 0}
 		<Card>
-			<CardContent class="py-8">
-				<p class="text-center text-gray-500">No jobs created yet.</p>
+			<CardContent class="py-12 text-center">
+                <h3 class="text-xl font-medium">No jobs found</h3>
+				<p class="text-gray-500 mt-2">Create your first translation job to get started.</p>
 			</CardContent>
 		</Card>
 	{:else}
-		<div class="grid gap-6">
+		<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
 			{#each $jobStore.jobs as job (job.id)}
-				<Card>
+				<Card class="flex flex-col">
 					<CardHeader>
-						<div class="flex justify-between items-start">
-							<div>
-								<CardTitle class="flex items-center gap-2">
-									{job.name}
-									<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium {getStatusColor(job.status)}">
-										{job.status.charAt(0).toUpperCase() + job.status.slice(1)}
-									</span>
-								</CardTitle>
-								<CardDescription>{job.description}</CardDescription>
+						<div class="flex justify-between items-start gap-4">
+							<div class="flex-1">
+								<CardTitle>{job.name}</CardTitle>
+								<CardDescription>{job.description || 'No description'}</CardDescription>
 							</div>
-							<div class="flex gap-2">
-								{#if job.status === 'pending'}
-									<Button
-										size="sm"
-										on:click={() => handleStartJob(job.id)}
-									>
-										Start
-									</Button>
-								{:else if job.status === 'running'}
-									<Button
-										variant="outline"
-										size="sm"
-										on:click={() => handleCancelJob(job.id)}
-									>
-										Cancel
-									</Button>
-								{/if}
-								<Button
-									variant="destructive"
-									size="sm"
-									on:click={() => handleDeleteJob(job.id)}
-								>
-									Delete
-								</Button>
-							</div>
+							<span class="text-xs font-semibold px-2 py-1 rounded-full {getStatusColor(job.status)}">
+								{job.status}
+							</span>
 						</div>
 					</CardHeader>
-					<CardContent>
-						<div class="grid grid-cols-2 gap-4 text-sm mb-4">
-							<div>
-								<p class="font-medium">Translation</p>
-								<p class="text-gray-600">{getLanguageName(job.source_language)} → {getLanguageName(job.target_language)}</p>
-							</div>
-							<div>
-								<p class="font-medium">Agent</p>
-								<p class="text-gray-600">{getAgentName(job.agent_id)}</p>
-							</div>
-							<div>
-								<p class="font-medium">Dataset</p>
-								<p class="text-gray-600">{getDatasetName(job.dataset_id)}</p>
-							</div>
-							<div>
-								<p class="font-medium">Progress</p>
-								<p class="text-gray-600">{job.processed_items}/{job.total_items} ({job.progress}%)</p>
-							</div>
+					<CardContent class="flex-grow space-y-4">
+						<div>
+							<p class="font-medium text-gray-500 text-sm">Translation</p>
+							<p>{getLanguageName(job.source_language)} → {getLanguageName(job.target_language)}</p>
 						</div>
-						
-						{#if job.status === 'running' || job.status === 'completed'}
-							<div class="w-full bg-gray-200 rounded-full h-2 mb-2">
-								<div class="bg-blue-600 h-2 rounded-full" style="width: {job.progress}%"></div>
-							</div>
-							<div class="text-xs text-gray-500">
-								{job.processed_items} processed, {job.failed_items} failed
-							</div>
-						{/if}
-
-						{#if job.error_message}
-							<div class="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-								Error: {job.error_message}
+						<div>
+							<p class="font-medium text-gray-500 text-sm">Agent & Dataset</p>
+							<p>{getAgentName(job.agent_id)} / {getDatasetName(job.dataset_id)}</p>
+						</div>
+						{#if job.status === 'running' || job.status === 'completed' || job.status === 'failed'}
+							<div>
+								<p class="font-medium text-gray-500 text-sm">Progress</p>
+								<div class="w-full bg-gray-200 rounded-full h-2.5">
+									<div class="bg-blue-600 h-2.5 rounded-full" style="width: {job.progress}%"></div>
+								</div>
+								<p class="text-xs text-gray-500 mt-1">{job.processed_items} / {job.total_items} items ({job.progress}%)</p>
 							</div>
 						{/if}
 					</CardContent>
-					<CardFooter>
+					<CardFooter class="flex justify-between items-center">
 						<div class="text-sm text-gray-500">
-							Created {new Date(job.created_at).toLocaleDateString()}
-							{#if job.started_at}
-								• Started {new Date(job.started_at).toLocaleDateString()}
+							Created on {new Date(job.created_at).toLocaleDateString()}
+						</div>
+						<div class="flex gap-2">
+							{#if job.status === 'pending'}
+								<Button size="sm" on:click={() => jobStore.startJob(job.id)} disabled={$jobStore.loading}>Start</Button>
 							{/if}
-							{#if job.completed_at}
-								• Completed {new Date(job.completed_at).toLocaleDateString()}
+							{#if job.status === 'running'}
+								<Button variant="outline" size="sm" on:click={() => jobStore.cancelJob(job.id)} disabled={$jobStore.loading}>Cancel</Button>
 							{/if}
+							<Button variant="destructive" size="sm" on:click={() => jobStore.deleteJob(job.id)} disabled={$jobStore.loading}>Delete</Button>
 						</div>
 					</CardFooter>
 				</Card>
 			{/each}
 		</div>
 	{/if}
-</div> 
+</main> 

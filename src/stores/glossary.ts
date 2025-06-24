@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
-import type { GlossaryEntry } from '../lib/supabaseClient';
+import type { GlossaryEntry, GlossaryStore } from '../types/glossary';
+import { getGlossaryEntries, createGlossaryEntry, updateGlossaryEntry, deleteGlossaryEntry } from '../lib/glossary/api';
 
 // Store for glossary entries
 export const glossaryEntries = writable<GlossaryEntry[]>([]);
@@ -81,3 +82,57 @@ export const glossaryActions = {
     glossaryEntries.set(mockEntries);
   }
 }; 
+
+function createGlossaryStore() {
+  const { subscribe, set, update } = writable<GlossaryStore>({
+    entries: [],
+    loading: false,
+    error: null
+  });
+
+  return {
+    subscribe,
+    
+    async loadEntries() {
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        const entries = await getGlossaryEntries();
+        set({ entries, loading: false, error: null });
+      } catch (error) {
+        set({ entries: [], loading: false, error: error instanceof Error ? error.message : 'Failed to load glossary' });
+      }
+    },
+
+    async addEntry(entry: Omit<GlossaryEntry, 'id' | 'created_at'>) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await createGlossaryEntry(entry);
+        await this.loadEntries();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to add entry' }));
+      }
+    },
+
+    async updateEntry(id: string, entry: Partial<GlossaryEntry>) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await updateGlossaryEntry(id, entry);
+        await this.loadEntries();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to update entry' }));
+      }
+    },
+
+    async deleteEntry(id: string) {
+      update(state => ({ ...state, loading: true }));
+      try {
+        await deleteGlossaryEntry(id);
+        await this.loadEntries();
+      } catch (error) {
+        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to delete entry' }));
+      }
+    },
+  };
+}
+
+export const glossaryStore = createGlossaryStore(); 
