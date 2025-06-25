@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { Job, JobStore } from '../types/jobs';
+import type { Job, JobStore, JobFormData } from '../types/jobs';
 import { getJobs, createJob, updateJob, deleteJob, startJob, cancelJob } from '../lib/jobs/api';
 
 function createJobStore() {
@@ -11,6 +11,7 @@ function createJobStore() {
 
   return {
     subscribe,
+    set,
     
     async loadJobs() {
       update(state => ({ ...state, loading: true, error: null }));
@@ -22,18 +23,10 @@ function createJobStore() {
       }
     },
 
-    async addJob(jobData: Omit<Job, 'id' | 'created_at' | 'status' | 'progress' | 'total_items' | 'processed_items' | 'failed_items'>) {
-        const job: Omit<Job, 'id' | 'created_at'> = {
-            ...jobData,
-            status: 'pending',
-            progress: 0,
-            total_items: 0,
-            processed_items: 0,
-            failed_items: 0,
-        };
+    async addJob(jobData: JobFormData) {
       update(state => ({ ...state, loading: true }));
       try {
-        await createJob(job);
+        await createJob(jobData);
         await this.loadJobs();
       } catch (error) {
         update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to create job' }));

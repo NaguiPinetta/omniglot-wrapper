@@ -50,6 +50,15 @@ export async function deleteModel(
 	if (error) throw error;
 }
 
+export async function getModel(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<Model> {
+	const { data, error } = await client.from('models').select('*').eq('id', id).single();
+	if (error) throw error;
+	return data;
+}
+
 // API Keys API
 export async function getApiKeys({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<ApiKey[]> {
 	const { data, error } = await client.from('api_keys').select('*').order('provider, created_at');
@@ -71,6 +80,18 @@ export async function createApiKey(
 	if (error) {
 		console.error('Supabase error:', error);
 		throw error;
+	}
+
+	// Automatically link all models for this provider to the new key
+	if (data && data.id && data.provider) {
+		const { error: updateError } = await client.from('models')
+			.update({ api_key_id: data.id })
+			.eq('provider', data.provider);
+		if (updateError) {
+			console.error('Failed to auto-link models to new API key:', updateError);
+		} else {
+			console.log(`✅ All ${data.provider} models have been linked to your saved key.`);
+		}
 	}
 	
 	console.log('Returning data:', data);
@@ -106,5 +127,14 @@ export async function getApiKeyByProvider(
 		.single();
 	
 	if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
+	return data;
+}
+
+export async function getApiKey(
+	id: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<ApiKey | null> {
+	const { data, error } = await client.from('api_keys').select('*').eq('id', id).single();
+	if (error) throw error;
 	return data;
 } 

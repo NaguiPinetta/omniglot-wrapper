@@ -7,7 +7,7 @@ export const load: PageServerLoad = async ({ fetch }) => {
 		const serverSupabase = createServerSupabaseClient(fetch);
 		const datasets = await getDatasets({ client: serverSupabase });
 		return {
-			datasets
+			datasets: datasets || []
 		};
 	} catch (error) {
 		console.error('Error loading datasets:', error);

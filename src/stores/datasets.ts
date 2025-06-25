@@ -11,6 +11,7 @@ function createDatasetStore() {
 
   return {
     subscribe,
+    set,
     
     async loadDatasets() {
       update(state => ({ ...state, loading: true, error: null }));

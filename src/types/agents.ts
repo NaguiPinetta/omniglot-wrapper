@@ -7,6 +7,7 @@ export type Agent = {
   temperature?: number;
   top_p?: number;
   created_at: string;
+  model_id: string;
 };
 
 export interface AgentFormData {
@@ -16,6 +17,7 @@ export interface AgentFormData {
   prompt: string;
   temperature?: number;
   top_p?: number;
+  model_id: string;
 }
 
 export interface AgentStore {

@@ -9,18 +9,49 @@ import * as XLSX from 'xlsx';
 export async function getDatasets({
 	client = supabaseClient
 }: { client?: SupabaseClient } = {}): Promise<Dataset[]> {
-	const { data, error } = await client.from('datasets').select('*').order('created_at', { ascending: false });
+	const { data, error } = await client.from('datasets').select('*').order('uploaded_at', { ascending: false });
 	if (error) throw error;
-	return data ?? [];
+	
+	// Map the database fields to match the expected Dataset interface
+	return (data ?? []).map(row => ({
+		id: row.id,
+		name: row.name,
+		description: '', // Not in database, use empty string
+		file_name: row.file_url || '', // Use file_url as file_name
+		file_size: 0, // Not in database, use 0
+		file_type: 'csv' as const, // Default to csv since not in database
+		row_count: row.row_count || 0,
+		columns: [], // Not in database, use empty array
+		status: 'ready' as const, // Default to ready since not in database
+		user_id: 'anonymous', // Default user
+		created_at: row.uploaded_at || new Date().toISOString(),
+		updated_at: row.uploaded_at || new Date().toISOString(),
+		file_url: row.file_url
+	}));
 }
 
 export async function getDataset(
 	id: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Dataset> {
-	const { data, error } = await client.from('datasets').select('*').eq('id', id).single();
+	const { data, error } = await client.from('datasets').select('*, file_content').eq('id', id).single();
 	if (error) throw error;
-	return data;
+	return {
+		id: data.id,
+		name: data.name,
+		description: '', // Not in database, use empty string
+		file_name: data.file_url || '',
+		file_size: 0, // Not in database, use 0
+		file_type: 'csv' as const, // Default to csv since not in database
+		row_count: data.row_count || 0,
+		columns: [], // Not in database, use empty array
+		status: 'ready' as const, // Default to ready since not in database
+		user_id: 'anonymous', // Default user
+		created_at: data.uploaded_at || new Date().toISOString(),
+		updated_at: data.uploaded_at || new Date().toISOString(),
+		file_url: data.file_url,
+		file_content: data.file_content
+	};
 }
 
 export async function createDataset(
@@ -83,17 +114,21 @@ export async function previewFile(file: File): Promise<DatasetPreview> {
       return new Promise((resolve, reject) => {
         const config = {
           header: true,
-          preview: 5,
           complete: (results: Papa.ParseResult<Record<string, any>>) => {
+            const allRows = results.data.filter(row => 
+              // Filter out empty rows
+              Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+            );
+            
             resolve({
               headers: results.meta.fields || [],
-              rows: results.data.map(row => 
+              rows: allRows.slice(0, 5).map(row => 
                 Object.entries(row).reduce((acc, [key, value]) => {
                   acc[key] = String(value ?? '');
                   return acc;
                 }, {} as Record<string, string>)
               ),
-              totalRows: results.data.length
+              totalRows: allRows.length
             });
           },
           error: (error: Papa.ParseError) => reject(error)
@@ -139,38 +174,94 @@ export async function previewFile(file: File): Promise<DatasetPreview> {
   }
 }
 
-export async function uploadAndCreateDataset(formData: DatasetFormData): Promise<DatasetUploadResponse> {
+export async function uploadAndCreateDataset(
+  formData: DatasetFormData,
+  { client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<DatasetUploadResponse> {
   if (!formData.file) throw new Error('No file provided');
 
   const file = formData.file;
-  const fileType = getFileType(file.name);
   const preview = await previewFile(file);
   
-  const fileName = `${Date.now()}_${file.name}`;
+  // Store the actual CSV content as text for later access
+  const fileContent = await file.text();
   
-  const { data: storageData, error: storageError } = await supabaseClient.storage
-    .from('datasets')
-    .upload(fileName, file);
-  if (storageError) throw storageError;
-
-  const { data: { publicUrl } } = supabaseClient.storage.from('datasets').getPublicUrl(fileName);
-
-  const newDataset: Partial<Dataset> = {
+  // For now, we'll create a dataset record with the file content stored
+  const { data, error } = await client.from('datasets').insert([{
     name: formData.name,
-    description: formData.description,
-    file_name: fileName,
+    row_count: preview.totalRows,
+    file_url: `${file.name}`, // Store original filename
+    file_content: fileContent, // Store the actual file content
+    columns: preview.headers // Store column headers
+  }]).select().single();
+  
+  if (error) throw error;
+
+  // Map the response to match the expected Dataset interface
+  const dataset: Dataset = {
+    id: data.id,
+    name: data.name,
+    description: formData.description || '',
+    file_name: file.name,
     file_size: file.size,
-    file_type: fileType,
+    file_type: getFileType(file.name),
     row_count: preview.totalRows,
     columns: preview.headers,
     status: 'ready',
-    file_url: publicUrl
+    user_id: 'anonymous',
+    created_at: data.uploaded_at || new Date().toISOString(),
+    updated_at: data.uploaded_at || new Date().toISOString(),
+    file_url: data.file_url,
+    file_content: data.file_content
   };
-
-  const createdDataset = await createDataset(newDataset as Omit<Dataset, 'id' | 'created_at'>, { client: supabaseClient });
 
   return {
-    dataset: createdDataset,
+    dataset,
     preview
   };
+}
+
+// --- CSV Content Access Functions ---
+
+export async function getDatasetPreview(
+  datasetId: string,
+  { client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<DatasetPreview> {
+  const { data, error } = await client
+    .from('datasets')
+    .select('file_content, columns')
+    .eq('id', datasetId)
+    .single();
+  
+  if (error) throw error;
+  
+  if (!data.file_content) {
+    throw new Error('Dataset content not found. Please re-upload the dataset.');
+  }
+  
+  // Parse the CSV content to get actual preview
+  return new Promise((resolve, reject) => {
+    const config = {
+      header: true,
+      complete: (results: Papa.ParseResult<Record<string, any>>) => {
+        const allRows = results.data.filter(row => 
+          // Filter out empty rows
+          Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+        );
+        
+        resolve({
+          headers: results.meta.fields || data.columns || [],
+          rows: allRows.slice(0, 5).map(row => 
+            Object.entries(row).reduce((acc, [key, value]) => {
+              acc[key] = String(value ?? '');
+              return acc;
+            }, {} as Record<string, string>)
+          ),
+          totalRows: allRows.length
+        });
+      },
+      error: (error: Papa.ParseError) => reject(error)
+    };
+    Papa.parse(data.file_content, config);
+  });
 }

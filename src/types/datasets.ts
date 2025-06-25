@@ -8,10 +8,11 @@ export interface Dataset {
   row_count: number;
   columns: string[];
   status: 'uploading' | 'processing' | 'ready' | 'error';
-  file_url: string;
+  file_url?: string;
   user_id: string;
   created_at: string;
   updated_at: string;
+  file_content?: string;
 }
 
 export interface DatasetPreview {

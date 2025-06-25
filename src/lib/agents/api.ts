@@ -73,31 +73,55 @@ export async function deleteAgent(
 export async function executeAgent(
 	agentId: string,
 	input: string,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	options: { client?: SupabaseClient, messages?: { role: string, content: string }[] }
 ): Promise<AgentResponse> {
   // First get the agent configuration
-	const agent = await getAgent(agentId, { client });
-  
-	// Removed is_active check since field doesn't exist
-	// if (!agent.is_active) {
-	// 	throw new Error('Agent is not active');
-	// }
+  const agent = await getAgent(agentId, { client: options.client });
 
-  // Here you would typically make a call to your AI service (OpenAI, Anthropic, etc.)
-  // For now, we'll simulate the response
-  const response: AgentResponse = {
-    id: crypto.randomUUID(),
-    content: `Simulated response from ${agent.custom_name}: ${input}`,
-    usage: {
-      prompt_tokens: input.length,
-      completion_tokens: 50,
-      total_tokens: input.length + 50
-    },
+  // Prepare messages array
+  const messages = options.messages || [
+    { role: 'system', content: agent.prompt },
+    { role: 'user', content: input }
+  ];
+
+  // Add timeout logic (30 seconds)
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000); // 30s
+
+  let res;
+  try {
+    res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: agent.model, messages }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Agent execution timed out after 30 seconds');
+    }
+    if (err instanceof Error) {
+      throw new Error(`Agent execution failed: ${err.message}`);
+    }
+    throw new Error('Agent execution failed: Unknown error');
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok) {
+    throw new Error(`Agent execution failed: ${res.status} ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  // Expecting data to match OpenAI/LLM API response shape
+  // Normalize to AgentResponse
+  return {
+    id: data.id ?? crypto.randomUUID(),
+    content: data.choices?.[0]?.message?.content || data.content || '',
+    usage: data.usage || {},
     model: agent.model,
     created_at: new Date().toISOString()
   };
-
-  return response;
 }
 
 export async function testConnection({ client = supabaseClient }: { client?: SupabaseClient } = {}) {

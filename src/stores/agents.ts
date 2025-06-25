@@ -22,6 +22,7 @@ function createAgentStore() {
 
   return {
     subscribe,
+    set,
     
     async loadAgents() {
       update(state => ({ ...state, loading: true, error: null }));

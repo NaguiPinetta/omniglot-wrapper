@@ -22,6 +22,7 @@ export type Model = {
 	input_cost_per_token?: number;
 	output_cost_per_token?: number;
 	is_active: boolean;
+	api_key_id: string;
 	
 	// Access control fields
 	access_type: ModelAccessType;

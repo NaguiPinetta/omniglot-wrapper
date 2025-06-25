@@ -18,7 +18,7 @@
   let formData: AgentFormData = {
     custom_name: '',
     prompt: 'You are a helpful assistant that translates text.',
-    model: '',
+    model_id: '',
     model_provider: 'openai',
     temperature: 0.7,
     top_p: 1.0
@@ -31,16 +31,17 @@
     { value: 'custom', label: 'Custom' }
   ];
 
-  // Generate available providers based on saved API keys
-  $: availableProviders = $modelStore.apiKeys.length > 0 
-    ? $modelStore.apiKeys
-      .map(apiKey => apiKey.provider)
-      .filter((provider, index, arr) => arr.indexOf(provider) === index) // Remove duplicates
-      .map(provider => {
-        const providerConfig = modelProviders.find(p => p.value === provider);
-        return providerConfig || { value: provider, label: provider.charAt(0).toUpperCase() + provider.slice(1) };
-      })
-    : modelProviders; // Fallback to all providers if no API keys loaded yet
+  // Add provider selection logic
+  let selectedProvider = '';
+  $: availableProviders = $modelStore.apiKeys
+    .map(k => k.provider)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+  $: availableApiKeyIds = $modelStore.apiKeys
+    .filter(k => k.provider === selectedProvider)
+    .map(k => k.id);
+  $: filteredModels = $modelStore.models.filter(
+    m => m.provider === selectedProvider && m.api_key_id && availableApiKeyIds.includes(m.api_key_id)
+  );
 
   let availableModels: Model[] = [];
   let loadingModels = false;
@@ -69,7 +70,7 @@
     formData = {
       custom_name: '',
       prompt: 'You are a helpful assistant that translates text.',
-      model: '',
+      model_id: '',
       model_provider: 'openai',
       temperature: 0.7,
       top_p: 1.0
@@ -112,10 +113,10 @@
     formData = {
       custom_name: agent.custom_name,
       prompt: agent.prompt,
-      model: agent.model,
+      model_id: agent.model,
       model_provider: agent.model_provider,
       temperature: agent.temperature,
-      top_p: agent.top_p,
+      top_p: agent.top_p
     };
     dialogOpen = true;
   }
@@ -125,7 +126,7 @@
     formData = {
       custom_name: '',
       prompt: 'You are a helpful assistant that translates text.',
-      model: '',
+      model_id: '',
       model_provider: 'openai',
       temperature: 0.7,
       top_p: 1.0
@@ -182,6 +183,12 @@
     // Simplified display for now
     return `${model.name} (${provider})${tokens}`;
   }
+
+  // New reactive variables
+  $: selectedModel = filteredModels.find(m => m.id === formData.model_id);
+  $: apiKey = selectedModel && selectedModel.api_key_id
+    ? $modelStore.apiKeys.find(k => k.id === selectedModel.api_key_id)
+    : null;
 </script>
 
 <svelte:head>
@@ -245,41 +252,36 @@
                 />
               </div>
 
-              <div class="grid grid-cols-1 gap-4">
-                <div>
+              <div class="mb-4">
+                <label for="agent-provider" class="block text-sm font-medium mb-1">Provider</label>
+                <select id="agent-provider" bind:value={selectedProvider} class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm" required>
+                  <option value="">Select a provider</option>
+                  {#each availableProviders as provider}
+                    <option value={provider}>{provider.charAt(0).toUpperCase() + provider.slice(1)}</option>
+                  {/each}
+                </select>
+              </div>
+
+              <!-- Model dropdown (only after provider is selected) -->
+              {#if selectedProvider}
+                <div class="mb-4">
                   <label for="agent-model" class="block text-sm font-medium mb-1">Model</label>
                   <select
                     id="agent-model"
-                    bind:value={formData.model}
-                    on:change={(e) => {
-                      const target = e.target as HTMLSelectElement;
-                      const selectedModel = $modelStore.models.find(m => m.name === target.value);
-                      if (selectedModel) {
-                        formData.model_provider = selectedModel.provider as Agent['model_provider'];
-                      }
-                    }}
+                    bind:value={formData.model_id}
                     class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
                     required
                   >
                     <option value="">Select a model</option>
-                    {#if $modelStore.loading}
-                      <option disabled>Loading models...</option>
-                    {:else if getAvailableModels($modelStore).length === 0}
-                      <option disabled>No models available - Add API keys first</option>
-                    {:else}
-                      {#each getAvailableModels($modelStore) as model}
-                        <option value={model.name}>
-                          {getModelDisplayName(model)}
-                        </option>
-                      {/each}
-                    {/if}
+                    {#each filteredModels as model}
+                      <option value={model.id}>{getModelDisplayName(model)}</option>
+                    {/each}
                   </select>
-                  <p class="text-xs text-gray-500 mt-1">
-                    🔑 API Key Required • 🆓 Free Models • 🎯 Demo Models • 🌐 Gateway Models<br/>
-                    <a href="/models" class="text-blue-600 hover:text-blue-700 underline">Manage API keys & models</a>
-                  </p>
+                  {#if apiKey}
+                    <p class="text-xs text-gray-500 mt-1">API Key: {apiKey.key_value.slice(0, 4)}***{apiKey.key_value.slice(-4)}</p>
+                  {/if}
                 </div>
-              </div>
+              {/if}
 
               <div class="grid grid-cols-2 gap-4">
                 <div>
