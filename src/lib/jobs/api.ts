@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { executeAgent } from '../agents/api';
 import { getDataset } from '../datasets/api';
 import Papa from 'papaparse';
+import { XMLParser } from 'fast-xml-parser';
 import { getModel, getApiKey } from '../models/api';
 import type { Dataset } from '../../types/datasets';
 import type { ColumnMapping } from '../../types/jobs';
@@ -191,17 +192,46 @@ async function processJobInBackground(
 			apiKey = apiKeyObj?.key_value;
 		}
 
-		// Parse rows from file_content if not present
+		// Determine file type and parse content accordingly
 		let allRows: Record<string, string>[] = [];
-		if ('rows' in dataset && Array.isArray((dataset as any).rows)) {
-			allRows = (dataset as any).rows;
+		let isXmlDataset = false;
+		
+		// Detect file type from dataset
+		if (dataset.file_type === 'xml' || (dataset.file_name && dataset.file_name.toLowerCase().endsWith('.xml'))) {
+			isXmlDataset = true;
+		}
+
+		if (isXmlDataset && dataset.file_content) {
+			// Parse XML content
+			const parser = new XMLParser({ ignoreAttributes: false });
+			const xml = parser.parse(dataset.file_content);
+			let rows: { key: string, value: string }[] = [];
+			if (xml.wGlnWirelessResourceDocument && xml.wGlnWirelessResourceDocument.ResourceEntry) {
+				const entries = Array.isArray(xml.wGlnWirelessResourceDocument.ResourceEntry)
+					? xml.wGlnWirelessResourceDocument.ResourceEntry
+					: [xml.wGlnWirelessResourceDocument.ResourceEntry];
+				rows = entries.map((entry: any) => ({
+					key: entry['@_ID'] || '',
+					value: entry['@_Value'] || ''
+				}));
+			} else if (xml.root?.data) {
+				// Fallback to previous logic
+				const dataArray = Array.isArray(xml.root.data) ? xml.root.data : [xml.root.data].filter(Boolean);
+				rows = (dataArray || []).map((entry: any) => ({
+					key: entry['@_name'] || '',
+					value: entry.value || ''
+				}));
+			}
+			console.log('[DEBUG] Parsed XML rows:', rows);
+			allRows = rows;
 		} else if (dataset.file_content) {
-			// Parse CSV content
+			// Parse CSV content (existing logic)
 			const parsed = Papa.parse(dataset.file_content, { header: true });
 			allRows = (parsed.data as Record<string, string>[]).filter(row =>
 				Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
 			);
 		}
+
 		const totalRows = allRows.length;
 		let processedCount = 0;
 		let skippedRows: any[] = [];
@@ -221,9 +251,25 @@ async function processJobInBackground(
 			}
 			try {
 				const row = allRows[i];
-				const sourceText = columnMapping.source_text_column ? row[columnMapping.source_text_column] : undefined;
-				const rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${i + 1}`;
-				const sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
+				
+				// Handle XML vs CSV differently for source text extraction
+				let sourceText: string;
+				let rowId: string;
+				let sourceLang: string;
+				
+				if (isXmlDataset) {
+					// For XML, use 'value' column as source text and 'key' as row ID
+					sourceText = row.value || '';
+					rowId = row.key || `xml_entry_${i + 1}`;
+					sourceLang = job.source_language || 'en';
+					console.log(`[DEBUG] XML row ${i}: rowId=${rowId}, sourceText='${sourceText}'`);
+				} else {
+					// For CSV, use column mapping
+					sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
+					rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${i + 1}`;
+					sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
+				}
+
 				if (!sourceText || sourceText.trim() === '') {
 					const skipInfo = {
 						row_id: rowId,
@@ -235,6 +281,7 @@ async function processJobInBackground(
 					skippedRows.push(skipInfo);
 					continue;
 				}
+
 				let targetText = '';
 				try {
 					const messages = [
@@ -270,8 +317,16 @@ ${sourceText}` }
 					skippedRows.push(skipInfo);
 					targetText = '';
 				}
+
 				// Append translation to the row
-				row[`translated_${targetLang}`] = targetText;
+				if (isXmlDataset) {
+					// For XML, add translated value
+					row[`translated_${targetLang}`] = targetText;
+				} else {
+					// For CSV, use existing logic
+					row[`translated_${targetLang}`] = targetText;
+				}
+				
 				completedRows.push({ ...row, row_id: rowId });
 
 				// Insert translation result into the translations table
@@ -291,8 +346,17 @@ ${sourceText}` }
 					}
 				]);
 				processedCount++;
+
+				// Update progress
+				await updateJob(jobId, {
+					processed_items: processedCount,
+					progress: Math.round((processedCount / totalRows) * 100)
+				}, { client });
+
 			} catch (error) {
-				const rowId = columnMapping.row_id_column ? allRows[i][columnMapping.row_id_column] : `row_${i + 1}`;
+				const rowId = isXmlDataset ? 
+					(allRows[i].key || `xml_entry_${i + 1}`) : 
+					(columnMapping.row_id_column ? allRows[i][columnMapping.row_id_column] : `row_${i + 1}`);
 				const skipInfo = {
 					row_id: rowId,
 					row_number: i + 1,
@@ -304,9 +368,6 @@ ${sourceText}` }
 				await updateJob(jobId, { failed_items: (job.failed_items || 0) + 1 }, { client });
 			}
 		}
-
-		// Save the full CSV with all new columns (implementation depends on your CSV export logic)
-		// ... existing code to save/export ...
 
 		// Update job status and counts
 		await updateJob(jobId, {

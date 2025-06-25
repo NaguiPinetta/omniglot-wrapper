@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <data name="welcome_message">
+    <value>Welcome to our application!</value>
+  </data>
+  <data name="login_button">
+    <value>Sign In</value>
+  </data>
+  <data name="logout_button">
+    <value>Sign Out</value>
+  </data>
+  <data name="settings_title">
+    <value>User Settings</value>
+  </data>
+  <data name="profile_description">
+    <value>Manage your profile information and preferences</value>
+  </data>
+  <data name="save_button">
+    <value>Save Changes</value>
+  </data>
+  <data name="cancel_button">
+    <value>Cancel</value>
+  </data>
+  <data name="error_message">
+    <value>An error occurred. Please try again.</value>
+  </data>
+  <data name="success_message">
+    <value>Operation completed successfully!</value>
+  </data>
+</root> 

@@ -3,6 +3,7 @@ import type { Dataset, DatasetPreview, DatasetUploadResponse, DatasetFormData } 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { XMLParser } from 'fast-xml-parser';
 
 // --- Database CRUD Functions ---
 
@@ -13,21 +14,33 @@ export async function getDatasets({
 	if (error) throw error;
 	
 	// Map the database fields to match the expected Dataset interface
-	return (data ?? []).map(row => ({
-		id: row.id,
-		name: row.name,
-		description: '', // Not in database, use empty string
-		file_name: row.file_url || '', // Use file_url as file_name
-		file_size: 0, // Not in database, use 0
-		file_type: 'csv' as const, // Default to csv since not in database
-		row_count: row.row_count || 0,
-		columns: [], // Not in database, use empty array
-		status: 'ready' as const, // Default to ready since not in database
-		user_id: 'anonymous', // Default user
-		created_at: row.uploaded_at || new Date().toISOString(),
-		updated_at: row.uploaded_at || new Date().toISOString(),
-		file_url: row.file_url
-	}));
+	return (data ?? []).map(row => {
+		// Determine file type from file_url extension
+		let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
+		if (row.file_url && typeof row.file_url === 'string') {
+			const ext = row.file_url.split('.').pop()?.toLowerCase();
+			if (ext === 'xml') fileType = 'xml';
+			else if (ext === 'json') fileType = 'json';
+			else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
+			else fileType = 'csv';
+		}
+		
+		return {
+			id: row.id,
+			name: row.name,
+			description: '', // Not in database, use empty string
+			file_name: row.file_url || '', // Use file_url as file_name
+			file_size: 0, // Not in database, use 0
+			file_type: fileType,
+			row_count: row.row_count || 0,
+			columns: row.columns || [], // Use stored columns if available
+			status: 'ready' as const, // Default to ready since not in database
+			user_id: 'anonymous', // Default user
+			created_at: row.uploaded_at || new Date().toISOString(),
+			updated_at: row.uploaded_at || new Date().toISOString(),
+			file_url: row.file_url
+		};
+	});
 }
 
 export async function getDataset(
@@ -36,15 +49,26 @@ export async function getDataset(
 ): Promise<Dataset> {
 	const { data, error } = await client.from('datasets').select('*, file_content').eq('id', id).single();
 	if (error) throw error;
+	
+	// Determine file type from file_url extension
+	let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
+	if (data.file_url && typeof data.file_url === 'string') {
+		const ext = data.file_url.split('.').pop()?.toLowerCase();
+		if (ext === 'xml') fileType = 'xml';
+		else if (ext === 'json') fileType = 'json';
+		else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
+		else fileType = 'csv';
+	}
+	
 	return {
 		id: data.id,
 		name: data.name,
 		description: '', // Not in database, use empty string
 		file_name: data.file_url || '',
 		file_size: 0, // Not in database, use 0
-		file_type: 'csv' as const, // Default to csv since not in database
+		file_type: fileType,
 		row_count: data.row_count || 0,
-		columns: [], // Not in database, use empty array
+		columns: data.columns || [], // Use stored columns if available
 		status: 'ready' as const, // Default to ready since not in database
 		user_id: 'anonymous', // Default user
 		created_at: data.uploaded_at || new Date().toISOString(),
@@ -96,12 +120,13 @@ export async function deleteDataset(
 
 // --- File Handling and Upload Logic ---
 
-function getFileType(fileName: string): 'csv' | 'xlsx' | 'json' {
+function getFileType(fileName: string): 'csv' | 'xlsx' | 'json' | 'xml' {
   const extension = fileName.split('.').pop()?.toLowerCase();
   switch (extension) {
     case 'csv': return 'csv';
     case 'xlsx': case 'xls': return 'xlsx';
     case 'json': return 'json';
+    case 'xml': return 'xml';
     default: throw new Error('Unsupported file type.');
   }
 }
@@ -169,6 +194,35 @@ export async function previewFile(file: File): Promise<DatasetPreview> {
         totalRows: jsonArray.length
       };
       
+    case 'xml': {
+      const content = await file.text();
+      const parser = new XMLParser({ ignoreAttributes: false });
+      const xml = parser.parse(content);
+      // Support <ResourceEntry ID="..." Value="..." ... />
+      let rows: { key: string, value: string }[] = [];
+      if (xml.wGlnWirelessResourceDocument && xml.wGlnWirelessResourceDocument.ResourceEntry) {
+        const entries = Array.isArray(xml.wGlnWirelessResourceDocument.ResourceEntry)
+          ? xml.wGlnWirelessResourceDocument.ResourceEntry
+          : [xml.wGlnWirelessResourceDocument.ResourceEntry];
+        rows = entries.map((entry: any) => ({
+          key: entry['@_ID'] || '',
+          value: entry['@_Value'] || ''
+        }));
+      } else if (xml.root?.data) {
+        // Fallback to previous logic
+        const dataArray = Array.isArray(xml.root.data) ? xml.root.data : [xml.root.data].filter(Boolean);
+        rows = (dataArray || []).map((entry: any) => ({
+          key: entry['@_name'] || '',
+          value: entry.value || ''
+        }));
+      }
+      return {
+        headers: ['key', 'value'],
+        rows: rows.slice(0, 5),
+        totalRows: rows.length
+      };
+    }
+      
     default:
       throw new Error('Unsupported file type');
   }
@@ -229,7 +283,7 @@ export async function getDatasetPreview(
 ): Promise<DatasetPreview> {
   const { data, error } = await client
     .from('datasets')
-    .select('file_content, columns')
+    .select('file_content, columns, file_url')
     .eq('id', datasetId)
     .single();
   
@@ -238,8 +292,34 @@ export async function getDatasetPreview(
   if (!data.file_content) {
     throw new Error('Dataset content not found. Please re-upload the dataset.');
   }
-  
-  // Parse the CSV content to get actual preview
+
+  // Determine file type from columns or file_url
+  let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
+  if (data.file_url && typeof data.file_url === 'string') {
+    const ext = data.file_url.split('.').pop()?.toLowerCase();
+    if (ext === 'xml') fileType = 'xml';
+    else if (ext === 'json') fileType = 'json';
+    else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
+    else fileType = 'csv';
+  }
+
+  if (fileType === 'xml') {
+    const parser = new XMLParser({ ignoreAttributes: false });
+    const xml = parser.parse(data.file_content);
+    // Assume structure: <root><data name="..."><value>...</value></data>...</root>
+    const dataArray = Array.isArray(xml.root?.data) ? xml.root.data : [xml.root?.data].filter(Boolean);
+    const rows = (dataArray || []).map((entry: any) => ({
+      key: entry['@_name'] || '',
+      value: entry.value || ''
+    }));
+    return {
+      headers: ['key', 'value'],
+      rows: rows.slice(0, 5),
+      totalRows: rows.length
+    };
+  }
+
+  // Default: CSV logic
   return new Promise((resolve, reject) => {
     const config = {
       header: true,

@@ -27,6 +27,7 @@
 	// Column mapping state
 	let selectedDatasetPreview: any[] = [];
 	let availableColumns: string[] = [];
+	let selectedDataset: any = null;
 	let columnMapping = {
 		source_text_column: '',
 		source_language_column: '',
@@ -216,25 +217,93 @@
 			const { getJobResults } = await import('../../lib/jobs/api');
 			const results = await getJobResults(jobId);
 			const job = $jobStore.jobs.find(j => j.id === jobId);
+			const dataset = $datasetStore.datasets.find(d => d.id === job?.dataset_id);
 			
-			// Convert results to CSV format
-			const csvContent = [
-				'Source Text,Target Text,Source Language,Target Language,Confidence,Status',
-				...results.map(r => `"${r.source_text}","${r.target_text}","${r.source_language}","${r.target_language}",${r.confidence},"${r.status}"`)
-			].join('\n');
-			
-			// Create and download file
-			const blob = new Blob([csvContent], { type: 'text/csv' });
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = `${job?.name || 'job'}_results.csv`;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			window.URL.revokeObjectURL(url);
+			if (!job || !dataset) {
+				console.error('Job or dataset not found');
+				return;
+			}
+
+			if (dataset.file_type === 'xml') {
+				// Download the original XML content
+				const { XMLParser, XMLBuilder } = await import('fast-xml-parser');
+				const parser = new XMLParser({ ignoreAttributes: false });
+				const builder = new XMLBuilder({ ignoreAttributes: false, suppressEmptyNode: false, format: true });
+				// Fetch the original file_content from the dataset API (in case it's not loaded)
+				let fileContent = dataset.file_content;
+				if (!fileContent) {
+					const { getDataset } = await import('../../lib/datasets/api');
+					const ds = await getDataset(dataset.id);
+					fileContent = ds.file_content;
+				}
+				fileContent = fileContent || '';
+				const xml = parser.parse(fileContent);
+				// Build a map of translations by row_id, but only for valid, non-empty row_ids
+				const translationMap = Object.fromEntries(results.filter(r => r.row_id && typeof r.row_id === 'string').map(r => [r.row_id, r.target_text]));
+				// Update only the Value attribute for each ResourceEntry that exists in the original XML
+				if (xml.wGlnWirelessResourceDocument && xml.wGlnWirelessResourceDocument.ResourceEntry) {
+					let entries = xml.wGlnWirelessResourceDocument.ResourceEntry;
+					if (!Array.isArray(entries)) entries = [entries];
+					for (let i = 0; i < entries.length; i++) {
+						const entry = entries[i];
+						const id = entry['@_ID'];
+						if (id && Object.prototype.hasOwnProperty.call(translationMap, id)) {
+							// Sanitize translation value: remove line breaks and stray XML markup
+							let safeValue = translationMap[id];
+							if (typeof safeValue === 'string') {
+								safeValue = safeValue.replace(/[\r\n]+/g, ' ').replace(/<[^>]+>/g, '');
+							}
+							// Ensure entry is a plain object with only attributes
+							entries[i] = {
+								'@_ID': entry['@_ID'],
+								'@_Value': safeValue,
+								'@_SuggestedLength': entry['@_SuggestedLength'],
+								// Copy any other attributes
+								...Object.fromEntries(Object.entries(entry).filter(([k]) => !['@_ID','@_Value','@_SuggestedLength'].includes(k) && k.startsWith('@_')))
+							};
+						}
+					}
+					console.log('[DEBUG] ResourceEntry structure before XML build:', entries);
+					// If it was a single entry, restore as object
+					if (xml.wGlnWirelessResourceDocument.ResourceEntry && !Array.isArray(xml.wGlnWirelessResourceDocument.ResourceEntry) && entries.length === 1) {
+						xml.wGlnWirelessResourceDocument.ResourceEntry = entries[0];
+					} else {
+						xml.wGlnWirelessResourceDocument.ResourceEntry = entries;
+					}
+				}
+				let xmlContent = builder.build(xml);
+				// Optionally decode XML entities for quotes/apostrophes
+				xmlContent = xmlContent.replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+				console.log('[DEBUG] Generated XML:', xmlContent);
+				const blob = new Blob([xmlContent], { type: 'application/xml' });
+				const url = window.URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${job.name || 'job'}_translated.xml`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url);
+			} else {
+				// Export as CSV (existing logic)
+				const csvContent = [
+					'Source Text,Target Text,Source Language,Target Language,Confidence,Status',
+					...results.map(r => `"${r.source_text}","${r.target_text}","${r.source_language}","${r.target_language}",${r.confidence},"${r.status}"`)
+				].join('\n');
+				
+				const blob = new Blob([csvContent], { type: 'text/csv' });
+				const url = window.URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${job.name || 'job'}_results.csv`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				window.URL.revokeObjectURL(url);
+			}
 		} catch (error) {
 			console.error('Failed to download results:', error);
+			alert('Failed to download results. Please try again.');
 		}
 	}
 
@@ -258,12 +327,16 @@
 		if (!datasetId) {
 			selectedDatasetPreview = [];
 			availableColumns = [];
+			selectedDataset = null;
 			return;
 		}
 
 		loadingPreview = true;
 		try {
-			// Import the getDatasetPreview function to get real CSV data
+			// Get the selected dataset to check its file type
+			selectedDataset = $datasetStore.datasets.find(d => d.id === datasetId);
+			
+			// Import the getDatasetPreview function to get real data
 			const { getDatasetPreview } = await import('../../lib/datasets/api');
 			const preview = await getDatasetPreview(datasetId);
 			
@@ -272,6 +345,7 @@
 			
 			console.log('Loaded real dataset preview:', preview);
 			console.log('Available columns:', availableColumns);
+			console.log('Dataset file type:', selectedDataset?.file_type);
 			
 			// Reset column mapping
 			columnMapping = {
@@ -280,40 +354,48 @@
 				row_id_column: ''
 			};
 			
-			// Auto-select common column names with intelligent matching
-			const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
-			const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
-			const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
-			
-			// Find the best match for source text column
-			for (const possible of possibleTextColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.source_text_column = match;
-					break;
+			// Handle XML datasets differently
+			if (selectedDataset?.file_type === 'xml') {
+				// For XML, we don't need column mapping - it's always key/value
+				columnMapping.source_text_column = 'value';
+				columnMapping.row_id_column = 'key';
+				columnMapping.source_language_column = '';
+			} else {
+				// For CSV, use intelligent column matching
+				const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
+				const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
+				const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
+				
+				// Find the best match for source text column
+				for (const possible of possibleTextColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.source_text_column = match;
+						break;
+					}
 				}
-			}
-			
-			// If no match found, use the first column as default
-			if (!columnMapping.source_text_column && availableColumns.length > 0) {
-				columnMapping.source_text_column = availableColumns[0];
-			}
-			
-			// Find the best match for row ID column
-			for (const possible of possibleIdColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.row_id_column = match;
-					break;
+				
+				// If no match found, use the first column as default
+				if (!columnMapping.source_text_column && availableColumns.length > 0) {
+					columnMapping.source_text_column = availableColumns[0];
 				}
-			}
-			
-			// Find the best match for language column
-			for (const possible of possibleLanguageColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.source_language_column = match;
-					break;
+				
+				// Find the best match for row ID column
+				for (const possible of possibleIdColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.row_id_column = match;
+						break;
+					}
+				}
+				
+				// Find the best match for language column
+				for (const possible of possibleLanguageColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.source_language_column = match;
+						break;
+					}
 				}
 			}
 			
@@ -322,6 +404,7 @@
 			// Fallback to empty state
 			selectedDatasetPreview = [];
 			availableColumns = [];
+			selectedDataset = null;
 			
 			// Show user-friendly error message
 			alert('Failed to load dataset preview. The dataset may need to be re-uploaded with the new format.');
@@ -514,92 +597,150 @@
 					<!-- Column Mapping Section -->
 					{#if formData.dataset_id}
 						<div class="border-t pt-4">
-							<h3 class="text-lg font-medium mb-3">📋 Map CSV Columns</h3>
-							
-							{#if loadingPreview}
-								<p class="text-sm text-gray-500">Loading dataset preview...</p>
-							{:else if availableColumns.length === 0}
-								<p class="text-sm text-gray-500">No columns detected. Please select a dataset first.</p>
-							{:else}
-								<div class="grid grid-cols-2 gap-4 mb-4">
-									<div>
-										<label for="source-text-column" class="block text-sm font-medium mb-1">Source Text Column <span class="text-red-500">*</span></label>
-										<select
-											id="source-text-column"
-											bind:value={columnMapping.source_text_column}
-											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-											required
-										>
-											<option value="" disabled>Select source text column</option>
-											{#each availableColumns as column}
-												<option value={column}>{column}</option>
-											{/each}
-										</select>
-									</div>
-									<div>
-										<label for="row-id-column" class="block text-sm font-medium mb-1">Row ID Column (Optional)</label>
-										<select
-											id="row-id-column"
-											bind:value={columnMapping.row_id_column}
-											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-										>
-											<option value="">None</option>
-											{#each availableColumns as column}
-												<option value={column}>{column}</option>
-											{/each}
-										</select>
-									</div>
-									<div>
-										<label for="source-language-column" class="block text-sm font-medium mb-1">Source Language Column (Optional)</label>
-										<select
-											id="source-language-column"
-											bind:value={columnMapping.source_language_column}
-											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-										>
-											<option value="">Use dropdown selection above</option>
-											{#each availableColumns as column}
-												<option value={column}>{column}</option>
-											{/each}
-										</select>
+							{#if selectedDataset?.file_type === 'xml'}
+								<!-- XML Dataset Interface -->
+								<h3 class="text-lg font-medium mb-3">📄 XML Key/Value Structure</h3>
+								<div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+									<div class="flex items-start gap-3">
+										<div class="text-blue-600 mt-0.5">
+											<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+											</svg>
+										</div>
+										<div>
+											<p class="text-sm font-medium text-blue-800">XML Translation Setup</p>
+											<p class="text-sm text-blue-700 mt-1">
+												XML files use a key/value structure. Each XML entry will be translated automatically:
+											</p>
+											<ul class="text-sm text-blue-700 mt-2 space-y-1">
+												<li>• <strong>Key:</strong> Used as row identifier</li>
+												<li>• <strong>Value:</strong> Text to be translated</li>
+												<li>• <strong>Output:</strong> Translated value with original key preserved</li>
+											</ul>
+										</div>
 									</div>
 								</div>
 
-								<!-- Dataset Preview -->
+								<!-- XML Dataset Preview -->
 								<div class="mt-4">
-									<h4 class="text-sm font-medium mb-2">Dataset Preview</h4>
+									<h4 class="text-sm font-medium mb-2">XML Preview</h4>
 									<div class="overflow-x-auto max-h-40 border rounded">
 										<table class="min-w-full text-xs">
 											<thead class="bg-gray-50">
 												<tr>
-													{#each availableColumns as column}
-														<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
-															{column}
-															{#if column === columnMapping.source_text_column}
-																<span class="text-blue-600">📝</span>
-															{:else if column === columnMapping.source_language_column}
-																<span class="text-green-600">🌐</span>
-															{:else if column === columnMapping.row_id_column}
-																<span class="text-orange-600">🆔</span>
-															{/if}
-														</th>
-													{/each}
+													<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
+														Key (Row ID)
+														<span class="text-orange-600">🆔</span>
+													</th>
+													<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
+														Value (Source Text)
+														<span class="text-blue-600">📝</span>
+													</th>
 												</tr>
 											</thead>
 											<tbody>
 												{#each selectedDatasetPreview.slice(0, 3) as row}
 													<tr class="border-t">
-														{#each availableColumns as column}
-															<td class="px-2 py-1 border-r text-gray-600 max-w-20 truncate">{row[column]}</td>
-														{/each}
+														<td class="px-2 py-1 border-r text-gray-600 max-w-32 truncate" title={row.key}>{row.key}</td>
+														<td class="px-2 py-1 border-r text-gray-600 max-w-48 truncate" title={row.value}>{row.value}</td>
 													</tr>
 												{/each}
 											</tbody>
 										</table>
 									</div>
 									<p class="text-xs text-gray-500 mt-1">
-										Showing first 3 rows. Icons: 📝 Source Text, 🌐 Source Lang, 🆔 Row ID
+										Showing first 3 XML entries. Icons: 🆔 Key (Row ID), 📝 Value (Source Text)
 									</p>
 								</div>
+							{:else}
+								<!-- CSV Dataset Interface -->
+								<h3 class="text-lg font-medium mb-3">📋 Map CSV Columns</h3>
+								
+								{#if loadingPreview}
+									<p class="text-sm text-gray-500">Loading dataset preview...</p>
+								{:else if availableColumns.length === 0}
+									<p class="text-sm text-gray-500">No columns detected. Please select a dataset first.</p>
+								{:else}
+									<div class="grid grid-cols-2 gap-4 mb-4">
+										<div>
+											<label for="source-text-column" class="block text-sm font-medium mb-1">Source Text Column <span class="text-red-500">*</span></label>
+											<select
+												id="source-text-column"
+												bind:value={columnMapping.source_text_column}
+												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+												required
+											>
+												<option value="" disabled>Select source text column</option>
+												{#each availableColumns as column}
+													<option value={column}>{column}</option>
+												{/each}
+											</select>
+										</div>
+										<div>
+											<label for="row-id-column" class="block text-sm font-medium mb-1">Row ID Column (Optional)</label>
+											<select
+												id="row-id-column"
+												bind:value={columnMapping.row_id_column}
+												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+											>
+												<option value="">None</option>
+												{#each availableColumns as column}
+													<option value={column}>{column}</option>
+												{/each}
+											</select>
+										</div>
+										<div>
+											<label for="source-language-column" class="block text-sm font-medium mb-1">Source Language Column (Optional)</label>
+											<select
+												id="source-language-column"
+												bind:value={columnMapping.source_language_column}
+												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+											>
+												<option value="">Use dropdown selection above</option>
+												{#each availableColumns as column}
+													<option value={column}>{column}</option>
+												{/each}
+											</select>
+										</div>
+									</div>
+
+									<!-- CSV Dataset Preview -->
+									<div class="mt-4">
+										<h4 class="text-sm font-medium mb-2">Dataset Preview</h4>
+										<div class="overflow-x-auto max-h-40 border rounded">
+											<table class="min-w-full text-xs">
+												<thead class="bg-gray-50">
+													<tr>
+														{#each availableColumns as column}
+															<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
+																{column}
+																{#if column === columnMapping.source_text_column}
+																	<span class="text-blue-600">📝</span>
+																{:else if column === columnMapping.source_language_column}
+																	<span class="text-green-600">🌐</span>
+																{:else if column === columnMapping.row_id_column}
+																	<span class="text-orange-600">🆔</span>
+																{/if}
+															</th>
+														{/each}
+													</tr>
+												</thead>
+												<tbody>
+													{#each selectedDatasetPreview.slice(0, 3) as row}
+														<tr class="border-t">
+															{#each availableColumns as column}
+																<td class="px-2 py-1 border-r text-gray-600 max-w-20 truncate">{row[column]}</td>
+															{/each}
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+										<p class="text-xs text-gray-500 mt-1">
+											Showing first 3 rows. Icons: 📝 Source Text, 🌐 Source Lang, 🆔 Row ID
+										</p>
+									</div>
+								{/if}
 							{/if}
 						</div>
 					{/if}
@@ -888,7 +1029,7 @@
 							Close
 						</Button>
 						<Button variant="primary" size="sm" on:click={() => downloadResults(selectedJobResults[0]?.job_id)}>
-							Download CSV
+							Download {selectedJobResults[0]?.job_id ? ($datasetStore.datasets.find(d => d.id === $jobStore.jobs.find(j => j.id === selectedJobResults[0]?.job_id)?.dataset_id)?.file_type === 'xml' ? 'XML' : 'CSV') : 'Results'}
 						</Button>
 					</div>
 				{/if}

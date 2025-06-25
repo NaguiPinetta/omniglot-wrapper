@@ -4,7 +4,7 @@ export interface Dataset {
   description: string;
   file_name: string;
   file_size: number;
-  file_type: 'csv' | 'xlsx' | 'json';
+  file_type: 'csv' | 'xlsx' | 'json' | 'xml';
   row_count: number;
   columns: string[];
   status: 'uploading' | 'processing' | 'ready' | 'error';
