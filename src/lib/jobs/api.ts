@@ -206,6 +206,8 @@ async function processJobInBackground(
 		let processedCount = 0;
 		let skippedRows: any[] = [];
 		let completedRows: any[] = [];
+		let totalTokens = 0;
+		let totalCost = 0;
 
 		const columnMapping: ColumnMapping = job.column_mapping || { source_text_column: '' };
 		const targetLang = job.target_language;
@@ -247,6 +249,15 @@ ${sourceText}` }
 					});
 					const data = await response.json();
 					targetText = data.choices?.[0]?.message?.content || data.content || '';
+
+					// Track token usage
+					const tokens = data.usage?.total_tokens || 0;
+					totalTokens += tokens;
+					// Calculate cost if model has cost per token
+					const inputCost = model.input_cost_per_token || 0;
+					const outputCost = model.output_cost_per_token || 0;
+					const cost = tokens * (inputCost + outputCost);
+					totalCost += cost;
 				} catch (error) {
 					const skipInfo = {
 						row_id: rowId,
@@ -302,7 +313,10 @@ ${sourceText}` }
 			status: 'completed',
 			completed_at: new Date().toISOString(),
 			processed_items: processedCount,
-			failed_items: skippedRows.length
+			failed_items: skippedRows.length,
+			progress: Math.round((processedCount / totalRows) * 100),
+			total_tokens: totalTokens,
+			total_cost: totalCost
 		}, { client });
 		console.log(`Job ${jobId} marked as completed. Processed: ${processedCount}, Skipped: ${skippedRows.length}`);
 	} catch (error) {

@@ -27,6 +27,8 @@ export interface Job {
   created_at: string;
   updated_at: string;
   skipped_rows?: SkippedRow[];
+  total_tokens?: number;
+  total_cost?: number;
 }
 
 export interface JobFormData {

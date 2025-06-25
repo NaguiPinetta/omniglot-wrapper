@@ -378,6 +378,23 @@
 			alert(`Test job creation failed: ${error}`);
 		}
 	}
+
+	function getPercent(job: Job) {
+		return job.total_items > 0 ? Math.round((job.processed_items / job.total_items) * 100) : 0;
+	}
+
+	// Add helper to format elapsed time
+	function formatElapsed(started: string | null, completed: string | null): string {
+		if (!started || !completed) return '';
+		const start = new Date(started);
+		const end = new Date(completed);
+		const ms = end.getTime() - start.getTime();
+		if (ms < 0) return '';
+		const sec = Math.floor(ms / 1000);
+		const min = Math.floor(sec / 60);
+		const remSec = sec % 60;
+		return min > 0 ? `${min}m ${remSec}s` : `${remSec}s`;
+	}
 </script>
 
 <svelte:head>
@@ -669,10 +686,8 @@
 					<CardHeader>
 						<div class="flex justify-between items-start gap-4">
 							<div class="flex-1">
-								<CardTitle class="text-lg font-semibold text-gray-900">
-									{job.name || 'No name'}
-								</CardTitle>
-								<CardDescription>{job.description || 'No description'}</CardDescription>
+								<h2 class="text-lg font-bold">{job.name || 'No name'}</h2>
+								<p class="text-gray-500 text-sm">{job.description || 'No description'}</p>
 							</div>
 							<span class="text-xs font-semibold px-2 py-1 rounded-full {getStatusColor(job.status)}">
 								{job.status}
@@ -689,11 +704,22 @@
 							<div>
 								<p class="font-medium text-gray-500 text-sm">Progress</p>
 								<div class="w-full bg-gray-200 rounded-full h-2.5">
-									<div class="bg-blue-600 h-2.5 rounded-full" style="width: {job.progress}%"></div>
+									<div class="bg-blue-600 h-2.5 rounded-full" style="width: {getPercent(job)}%"></div>
 								</div>
-								<p class="text-xs text-gray-500 mt-1">{job.processed_items} / {job.total_items} items ({job.progress}%)</p>
+								<p class="text-xs text-gray-500 mt-1">{job.processed_items} / {job.total_items} items ({getPercent(job)}%)</p>
 								{#if job.failed_items > 0}
 									<p class="text-xs text-red-500">{job.failed_items} failed</p>
+								{/if}
+							</div>
+							<div class="flex flex-row gap-4 mt-2 text-xs text-gray-600 border border-gray-100 rounded px-2 py-1 bg-gray-50">
+								{#if job.started_at && job.completed_at}
+									<span>Elapsed: {formatElapsed(job.started_at, job.completed_at)}</span>
+								{/if}
+								{#if job.total_tokens}
+									<span>Tokens: {job.total_tokens}</span>
+								{/if}
+								{#if job.total_cost}
+									<span>Cost: ${job.total_cost.toFixed(4)}</span>
 								{/if}
 							</div>
 						{/if}
