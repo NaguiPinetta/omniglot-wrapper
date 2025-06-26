@@ -10,6 +10,18 @@ BEGIN
     END IF;
 END $$;
 
+-- Add completed_rows column if it doesn't exist
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'jobs' AND column_name = 'completed_rows') THEN
+        ALTER TABLE jobs ADD COLUMN completed_rows JSONB;
+        RAISE NOTICE 'Added completed_rows column to jobs table';
+    ELSE
+        RAISE NOTICE 'completed_rows column already exists';
+    END IF;
+END $$;
+
 -- Check if all expected columns exist
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns 

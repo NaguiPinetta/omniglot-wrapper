@@ -276,22 +276,40 @@
 				xmlContent = xmlContent.replace(/&quot;/g, '"').replace(/&apos;/g, "'");
 				console.log('[DEBUG] Generated XML:', xmlContent);
 				const blob = new Blob([xmlContent], { type: 'application/xml' });
-				const url = window.URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
 				a.download = `${job.name || 'job'}_translated.xml`;
-				document.body.appendChild(a);
-				a.click();
-				document.body.removeChild(a);
-				window.URL.revokeObjectURL(url);
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			window.URL.revokeObjectURL(url);
 			} else {
-				// Export as CSV (existing logic)
-				const csvContent = [
-					'Source Text,Target Text,Source Language,Target Language,Confidence,Status',
-					...results.map(r => `"${r.source_text}","${r.target_text}","${r.source_language}","${r.target_language}",${r.confidence},"${r.status}"`)
-				].join('\n');
-				
-				const blob = new Blob([csvContent], { type: 'text/csv' });
+				// Export as CSV using completed_rows
+				const Papa = (await import('papaparse')).default;
+				let fileContent = dataset.file_content;
+				let originalHeaders: string[] = [];
+				let originalDelimiter = ',';
+				if (fileContent) {
+					const parsed = Papa.parse(fileContent, { header: true });
+					originalHeaders = parsed.meta.fields || [];
+					originalDelimiter = parsed.meta.delimiter || ',';
+				}
+
+				const completedRows = job.completed_rows || [];
+				if (!completedRows.length) {
+					alert('No completed rows found for this job.');
+					return;
+				}
+
+				// Ensure all columns are present in the output
+				let headers = completedRows.length > 0 ? Object.keys(completedRows[0]) : [];
+				// Ensure 'Translated Text' is last
+				headers = headers.filter(h => h !== 'Translated Text').concat('Translated Text');
+				const csvContent = Papa.unparse(completedRows, { columns: headers, delimiter: originalDelimiter });
+				// Prepend UTF-8 BOM for Excel compatibility
+				const BOM = '\uFEFF';
+				const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
 				const url = window.URL.createObjectURL(blob);
 				const a = document.createElement('a');
 				a.href = url;
@@ -362,39 +380,39 @@
 				columnMapping.source_language_column = '';
 			} else {
 				// For CSV, use intelligent column matching
-				const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
-				const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
-				const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
-				
-				// Find the best match for source text column
-				for (const possible of possibleTextColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.source_text_column = match;
-						break;
-					}
+			const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
+			const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
+			const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
+			
+			// Find the best match for source text column
+			for (const possible of possibleTextColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.source_text_column = match;
+					break;
 				}
-				
-				// If no match found, use the first column as default
-				if (!columnMapping.source_text_column && availableColumns.length > 0) {
-					columnMapping.source_text_column = availableColumns[0];
+			}
+			
+			// If no match found, use the first column as default
+			if (!columnMapping.source_text_column && availableColumns.length > 0) {
+				columnMapping.source_text_column = availableColumns[0];
+			}
+			
+			// Find the best match for row ID column
+			for (const possible of possibleIdColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.row_id_column = match;
+					break;
 				}
-				
-				// Find the best match for row ID column
-				for (const possible of possibleIdColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.row_id_column = match;
-						break;
-					}
-				}
-				
-				// Find the best match for language column
-				for (const possible of possibleLanguageColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.source_language_column = match;
-						break;
+			}
+			
+			// Find the best match for language column
+			for (const possible of possibleLanguageColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.source_language_column = match;
+					break;
 					}
 				}
 			}
@@ -535,8 +553,8 @@
 											<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
 											</svg>
-										</div>
-										<div>
+						</div>
+						<div>
 											<p class="text-sm font-medium text-blue-800">XML Translation Setup</p>
 											<p class="text-sm text-blue-700 mt-1">
 												XML files use a key/value structure. Each XML entry will be translated automatically:
@@ -546,9 +564,9 @@
 												<li>• <strong>Value:</strong> Text to be translated</li>
 												<li>• <strong>Output:</strong> Translated value with original key preserved</li>
 											</ul>
-										</div>
-									</div>
-								</div>
+						</div>
+					</div>
+					</div>
 
 								<!-- XML Dataset Preview -->
 								<div class="mt-4">
@@ -583,92 +601,92 @@
 								</div>
 							{:else}
 								<!-- CSV Dataset Interface -->
-								<h3 class="text-lg font-medium mb-3">📋 Map CSV Columns</h3>
-								
-								{#if loadingPreview}
-									<p class="text-sm text-gray-500">Loading dataset preview...</p>
-								{:else if availableColumns.length === 0}
-									<p class="text-sm text-gray-500">No columns detected. Please select a dataset first.</p>
-								{:else}
-									<div class="grid grid-cols-2 gap-4 mb-4">
-										<div>
-											<label for="source-text-column" class="block text-sm font-medium mb-1">Source Text Column <span class="text-red-500">*</span></label>
-											<select
-												id="source-text-column"
-												bind:value={columnMapping.source_text_column}
-												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-												required
-											>
-												<option value="" disabled>Select source text column</option>
-												{#each availableColumns as column}
-													<option value={column}>{column}</option>
-												{/each}
-											</select>
-										</div>
-										<div>
-											<label for="row-id-column" class="block text-sm font-medium mb-1">Row ID Column (Optional)</label>
-											<select
-												id="row-id-column"
-												bind:value={columnMapping.row_id_column}
-												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-											>
-												<option value="">None</option>
-												{#each availableColumns as column}
-													<option value={column}>{column}</option>
-												{/each}
-											</select>
-										</div>
-										<div>
-											<label for="source-language-column" class="block text-sm font-medium mb-1">Source Language Column (Optional)</label>
-											<select
-												id="source-language-column"
-												bind:value={columnMapping.source_language_column}
-												class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-											>
-												<option value="">Use dropdown selection above</option>
-												{#each availableColumns as column}
-													<option value={column}>{column}</option>
-												{/each}
-											</select>
-										</div>
+							<h3 class="text-lg font-medium mb-3">📋 Map CSV Columns</h3>
+							
+							{#if loadingPreview}
+								<p class="text-sm text-gray-500">Loading dataset preview...</p>
+							{:else if availableColumns.length === 0}
+								<p class="text-sm text-gray-500">No columns detected. Please select a dataset first.</p>
+							{:else}
+								<div class="grid grid-cols-2 gap-4 mb-4">
+									<div>
+										<label for="source-text-column" class="block text-sm font-medium mb-1">Source Text Column <span class="text-red-500">*</span></label>
+										<select
+											id="source-text-column"
+											bind:value={columnMapping.source_text_column}
+											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+											required
+										>
+											<option value="" disabled>Select source text column</option>
+											{#each availableColumns as column}
+												<option value={column}>{column}</option>
+											{/each}
+										</select>
 									</div>
+									<div>
+										<label for="row-id-column" class="block text-sm font-medium mb-1">Row ID Column (Optional)</label>
+										<select
+											id="row-id-column"
+											bind:value={columnMapping.row_id_column}
+											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+										>
+											<option value="">None</option>
+											{#each availableColumns as column}
+												<option value={column}>{column}</option>
+											{/each}
+										</select>
+									</div>
+									<div>
+										<label for="source-language-column" class="block text-sm font-medium mb-1">Source Language Column (Optional)</label>
+										<select
+											id="source-language-column"
+											bind:value={columnMapping.source_language_column}
+											class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+										>
+											<option value="">Use dropdown selection above</option>
+											{#each availableColumns as column}
+												<option value={column}>{column}</option>
+											{/each}
+										</select>
+									</div>
+								</div>
 
 									<!-- CSV Dataset Preview -->
-									<div class="mt-4">
-										<h4 class="text-sm font-medium mb-2">Dataset Preview</h4>
-										<div class="overflow-x-auto max-h-40 border rounded">
-											<table class="min-w-full text-xs">
-												<thead class="bg-gray-50">
-													<tr>
+								<div class="mt-4">
+									<h4 class="text-sm font-medium mb-2">Dataset Preview</h4>
+									<div class="overflow-x-auto max-h-40 border rounded">
+										<table class="min-w-full text-xs">
+											<thead class="bg-gray-50">
+												<tr>
+													{#each availableColumns as column}
+														<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
+															{column}
+															{#if column === columnMapping.source_text_column}
+																<span class="text-blue-600">📝</span>
+															{:else if column === columnMapping.source_language_column}
+																<span class="text-green-600">🌐</span>
+															{:else if column === columnMapping.row_id_column}
+																<span class="text-orange-600">🆔</span>
+															{/if}
+														</th>
+													{/each}
+												</tr>
+											</thead>
+											<tbody>
+												{#each selectedDatasetPreview.slice(0, 3) as row}
+													<tr class="border-t">
 														{#each availableColumns as column}
-															<th class="px-2 py-1 text-left font-medium text-gray-500 border-r">
-																{column}
-																{#if column === columnMapping.source_text_column}
-																	<span class="text-blue-600">📝</span>
-																{:else if column === columnMapping.source_language_column}
-																	<span class="text-green-600">🌐</span>
-																{:else if column === columnMapping.row_id_column}
-																	<span class="text-orange-600">🆔</span>
-																{/if}
-															</th>
+															<td class="px-2 py-1 border-r text-gray-600 max-w-20 truncate">{row[column]}</td>
 														{/each}
 													</tr>
-												</thead>
-												<tbody>
-													{#each selectedDatasetPreview.slice(0, 3) as row}
-														<tr class="border-t">
-															{#each availableColumns as column}
-																<td class="px-2 py-1 border-r text-gray-600 max-w-20 truncate">{row[column]}</td>
-															{/each}
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-										<p class="text-xs text-gray-500 mt-1">
-											Showing first 3 rows. Icons: 📝 Source Text, 🌐 Source Lang, 🆔 Row ID
-										</p>
+												{/each}
+											</tbody>
+										</table>
 									</div>
+									<p class="text-xs text-gray-500 mt-1">
+											Showing first 3 rows. Icons: 📝 Source Text, 🌐 Source Lang, 🆔 Row ID
+									</p>
+								</div>
 								{/if}
 							{/if}
 						</div>

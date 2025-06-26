@@ -176,15 +176,15 @@ async function processJobInBackground(
 	try {
 		let job = await getJob(jobId, { client });
 		console.log('Job retrieved for processing:', job);
-
+		
 		const dataset = await getDataset(job.dataset_id, { client });
 		console.log('Dataset retrieved:', dataset);
-
+		
 		// Get the agent and its prompt
 		const { getAgent } = await import('../agents/api');
 		const agent = await getAgent(job.agent_id, { client });
 		console.log('Agent retrieved:', agent);
-
+		
 		// Get the model by agent.model_id
 		const model = await getModel(agent.model_id, { client });
 		console.log('Model retrieved:', model);
@@ -199,6 +199,7 @@ async function processJobInBackground(
 		// Determine file type and parse content accordingly
 		let allRows: Record<string, string>[] = [];
 		let isXmlDataset = false;
+		let originalRows: Record<string, string>[] = [];
 		
 		// Detect file type from dataset
 		if (dataset.file_type === 'xml' || (dataset.file_name && dataset.file_name.toLowerCase().endsWith('.xml'))) {
@@ -229,11 +230,14 @@ async function processJobInBackground(
 			console.log('[DEBUG] Parsed XML rows:', rows);
 			allRows = rows;
 		} else if (dataset.file_content) {
-			// Parse CSV content (existing logic)
 			const parsed = Papa.parse(dataset.file_content, { header: true });
-			allRows = (parsed.data as Record<string, string>[]).filter(row =>
+			originalRows = (parsed.data as Record<string, string>[]).filter(row =>
 				Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
 			);
+			allRows = originalRows;
+			// Store original headers and delimiter for export
+			var originalHeaders = parsed.meta.fields || [];
+			var originalDelimiter = parsed.meta.delimiter || ',';
 		}
 
 		const totalRows = allRows.length;
@@ -285,7 +289,7 @@ async function processJobInBackground(
 					skippedRows.push(skipInfo);
 					continue;
 				}
-
+				
 				let targetText = '';
 				try {
 					const messages = [
@@ -327,33 +331,38 @@ ${sourceText}` }
 					// For XML, add translated value
 					row[`translated_${targetLang}`] = targetText;
 				} else {
-					// For CSV, use existing logic
-					row[`translated_${targetLang}`] = targetText;
+					// For CSV, retain all original columns and append 'Translated Text'
+					let translatedText = targetText;
+					if (!translatedText || translatedText.trim() === '') {
+						translatedText = skippedRows.some(s => s.row_id === rowId) ? 'ERROR' : '';
+					}
+					completedRows.push({
+						...originalRows[i],
+						'Translated Text': translatedText
+					});
 				}
 				
-				completedRows.push({ ...row, row_id: rowId });
-
 				// Insert translation result into the translations table
 				await client.from('translations').insert([
 					{
-						job_id: jobId,
-						source_text: sourceText,
+					job_id: jobId,
+					source_text: sourceText,
 						target_text: targetText,
 						source_language: sourceLang,
 						target_language: targetLang,
 						confidence: 1,
-						status: 'completed',
+					status: 'completed',
 						error: null,
 						created_at: new Date().toISOString(),
 						updated_at: new Date().toISOString(),
-						row_id: rowId
+					row_id: rowId
 					}
 				]);
 				processedCount++;
-
+				
 				// Update progress
-				await updateJob(jobId, {
-					processed_items: processedCount,
+				await updateJob(jobId, { 
+					processed_items: processedCount, 
 					progress: Math.round((processedCount / totalRows) * 100)
 				}, { client });
 
@@ -384,6 +393,58 @@ ${sourceText}` }
 			total_cost: totalCost
 		}, { client });
 		console.log(`Job ${jobId} marked as completed. Processed: ${processedCount}, Skipped: ${skippedRows.length}`);
+
+		// After processing all rows, store completedRows for CSV jobs
+		if (!isXmlDataset && dataset.file_content) {
+			const parsed = Papa.parse(dataset.file_content, { header: true });
+			const originalRows = parsed.data as Record<string, string>[];
+			allRows = originalRows;
+			for (let i = 0; i < originalRows.length; i++) {
+				const row = originalRows[i];
+				let sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
+				let rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${i + 1}`;
+				let sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
+				let translatedText = '';
+				let skipReason = '';
+				if (!sourceText || sourceText.trim() === '') {
+					skipReason = 'Empty source text';
+					skippedRows.push({ row_id: rowId, row_number: i + 1, reason: skipReason, data: row });
+				} else {
+					try {
+						const messages = [
+							{ role: 'system', content: agent.prompt },
+							{ role: 'user', content: `Translate from ${sourceLang} to ${targetLang}:
+${sourceText}` }
+						];
+						const response = await fetch('/api/chat', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ model: model.name, messages, api_key: apiKey })
+						});
+						const data = await response.json();
+						translatedText = data.choices?.[0]?.message?.content || data.content || '';
+						// Track token usage, cost, etc. (existing logic)
+					} catch (error) {
+						skipReason = error instanceof Error ? error.message : 'Unknown error';
+						skippedRows.push({ row_id: rowId, row_number: i + 1, reason: skipReason, data: row });
+						translatedText = '';
+					}
+				}
+				// Always push a row for every original row, preserving order
+				completedRows.push({
+					...row,
+					'Translated Text': translatedText || (skipReason ? 'ERROR' : '')
+				});
+			}
+			// Add logging for debugging completedRows saving
+			try {
+				console.log('About to save completedRows:', completedRows.length, completedRows[0]);
+				await updateJob(jobId, { completed_rows: completedRows }, { client });
+				console.log('Saved completedRows successfully');
+			} catch (err) {
+				console.error('Failed to save completedRows:', err);
+			}
+		}
 	} catch (error) {
 		console.error('Job processing failed:', error);
 		await updateJob(jobId, {

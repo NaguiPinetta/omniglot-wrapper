@@ -29,6 +29,7 @@ export interface Job {
   skipped_rows?: SkippedRow[];
   total_tokens?: number;
   total_cost?: number;
+  completed_rows?: any[];
 }
 
 export interface JobFormData {
