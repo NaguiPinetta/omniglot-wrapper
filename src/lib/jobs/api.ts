@@ -120,7 +120,11 @@ export async function getJobResults(
 	jobId: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<JobResult[]> {
-	const { data, error } = await client.from('translations').select('*').eq('job_id', jobId).order('created_at', { ascending: true });
+	const { data, error } = await client.from('translations')
+		.select('*')
+		.eq('job_id', jobId)
+		.order('created_at', { ascending: true })
+		.range(0, 5999); // Fetch up to 6000 rows
 	if (error) throw error;
 	return data ?? [];
 }

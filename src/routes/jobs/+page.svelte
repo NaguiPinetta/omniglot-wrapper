@@ -418,50 +418,6 @@
 		loadDatasetPreview(formData.dataset_id);
 	}
 
-	// Test function to debug job creation
-	async function testJobCreation() {
-		console.log('Testing job creation...');
-		
-		// Test with minimal data
-		const testJobData = {
-			name: 'Test Job',
-			description: 'Test job description',
-			agent_id: $agentStore.agents[0]?.id,
-			dataset_id: $datasetStore.datasets[0]?.id,
-			source_language: 'en',
-			translation_instructions: 'Test instructions',
-			column_mapping: {
-				source_text_column: 'text',
-				source_language_column: '',
-				row_id_column: ''
-			},
-			target_language: 'es'
-		};
-		
-		console.log('Test job data:', testJobData);
-		
-		if (!testJobData.agent_id) {
-			console.error('No agents available for test');
-			alert('No agents available for test');
-			return;
-		}
-		
-		if (!testJobData.dataset_id) {
-			console.error('No datasets available for test');
-			alert('No datasets available for test');
-			return;
-		}
-		
-		try {
-			await jobStore.addJob(testJobData);
-			console.log('Test job creation successful!');
-			alert('Test job created successfully!');
-		} catch (error) {
-			console.error('Test job creation failed:', error);
-			alert(`Test job creation failed: ${error}`);
-		}
-	}
-
 	function getPercent(job: Job) {
 		return job.total_items > 0 ? Math.round((job.processed_items / job.total_items) * 100) : 0;
 	}
@@ -493,33 +449,6 @@
 		<div class="flex gap-2">
 			<Button on:click={openModal} disabled={$agentStore.agents.length === 0 || $datasetStore.datasets.length === 0}>
 				Create Job
-			</Button>
-			<!-- Debug button for testing -->
-			<Button variant="secondary" on:click={async () => {
-				console.log('Debug - Testing job creation...');
-				const testData = {
-					name: 'Debug Test Job',
-					description: 'Testing job creation',
-					agent_id: $agentStore.agents[0]?.id || '',
-					dataset_id: $datasetStore.datasets[0]?.id || '',
-					source_language: 'en',
-					translation_instructions: '',
-					column_mapping: { source_text_column: 'text', source_language_column: '', row_id_column: '' },
-					target_language: 'es'
-				};
-				console.log('Debug test data:', testData);
-				if (!testData.agent_id || !testData.dataset_id) {
-					alert('Missing agent or dataset for debug test');
-					return;
-				}
-				try {
-					await jobStore.addJob(testData);
-					console.log('Debug job creation successful');
-				} catch (error) {
-					console.error('Debug job creation failed:', error);
-				}
-			}}>
-				Debug Test
 			</Button>
 		</div>
 	</div>
