@@ -12,7 +12,6 @@
 		DialogTrigger
 	} from '$lib/components/ui/dialog';
 	import type { GlossaryFormData, GlossaryEntry } from '../../types/glossary';
-	import { getModules } from '$lib/glossary/api';
 	import { getLanguageOptions } from '../../utils/helpers';
 
 	// New: modules and filter state
@@ -53,16 +52,54 @@
 	}
 
 	async function handleSave() {
-		if (isEditing && currentEditId) {
-			await glossaryStore.updateEntry(currentEditId, editingEntry);
-		} else {
-			await glossaryStore.addEntry(editingEntry);
+		console.log('=== GLOSSARY SAVE DEBUG START ===');
+		console.log('Editing entry:', editingEntry);
+		console.log('Exceptions input:', exceptionsInput);
+		console.log('Is editing:', isEditing);
+		console.log('Current edit ID:', currentEditId);
+		
+		// Clean up the entry data before saving
+		const cleanedEntry = {
+			...editingEntry,
+			// Convert empty strings to undefined for optional fields, except module_id
+			note: editingEntry.note?.trim() || undefined,
+			context: editingEntry.context?.trim() || undefined,
+			// module_id should be empty string (not undefined) to match API schema
+			module_id: editingEntry.module_id || '',
+			type: editingEntry.type?.trim() || undefined,
+			description: editingEntry.description?.trim() || undefined,
+			// Ensure exceptions is valid JSON or undefined
+			exceptions: editingEntry.exceptions && Object.keys(editingEntry.exceptions).length > 0 
+				? editingEntry.exceptions 
+				: undefined
+		};
+		
+		console.log('Cleaned entry:', cleanedEntry);
+		
+		try {
+			if (isEditing && currentEditId) {
+				console.log('Updating entry...');
+				await glossaryStore.updateEntry(currentEditId, cleanedEntry);
+			} else {
+				console.log('Adding new entry...');
+				await glossaryStore.addEntry(cleanedEntry);
+			}
+			
+			console.log('Store error after save:', $glossaryStore.error);
+			
+			if (!$glossaryStore.error) {
+				console.log('Save successful, closing dialog');
+				showAddDialog = false;
+				isEditing = false;
+				currentEditId = null;
+			} else {
+				console.error('Store error:', $glossaryStore.error);
+			}
+		} catch (error) {
+			console.error('Exception during save:', error);
 		}
-		if (!$glossaryStore.error) {
-			showAddDialog = false;
-			isEditing = false;
-			currentEditId = null;
-		}
+		
+		console.log('=== GLOSSARY SAVE DEBUG END ===');
 	}
 
 	async function handleDelete(id: string) {
@@ -78,8 +115,15 @@
 	}
 	function syncInputToExceptions() {
 		try {
-			editingEntry.exceptions = JSON.parse(exceptionsInput);
-		} catch {}
+			if (exceptionsInput.trim()) {
+				editingEntry.exceptions = JSON.parse(exceptionsInput);
+			} else {
+				editingEntry.exceptions = {};
+			}
+		} catch (error) {
+			console.warn('Invalid JSON in exceptions field:', error);
+			// Keep the current exceptions object if JSON is invalid
+		}
 	}
 
 	async function handleAddModule() {
@@ -100,7 +144,7 @@
 				addModuleError = data.error;
 				return;
 			}
-			modules = await getModules({});
+			await refreshModules();
 			editingEntry.module_id = data.module.id;
 			showAddModule = false;
 			newModuleName = '';
@@ -111,7 +155,18 @@
 	}
 
 	async function refreshModules() {
-		modules = await getModules({});
+		try {
+			// Use the API endpoint instead of direct Supabase client
+			const response = await fetch('/api/modules');
+			const result = await response.json();
+			if (result.error) {
+				console.error('Failed to load modules:', result.error);
+			} else {
+				modules = result.modules || [];
+			}
+		} catch (error) {
+			console.error('Error refreshing modules:', error);
+		}
 	}
 </script>
 
@@ -244,7 +299,7 @@
 								<div>
 									<label class="block text-sm font-medium">Exceptions (JSON)</label>
 									<Textarea bind:value={exceptionsInput} rows={3} on:input={syncInputToExceptions} on:blur={syncInputToExceptions} />
-									<Button size="xs" variant="secondary" on:click={syncExceptionsToInput}>Sync from object</Button>
+									<Button size="sm" variant="secondary" on:click={syncExceptionsToInput}>Sync from object</Button>
 								</div>
 							</div>
 							<div class="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
@@ -328,7 +383,7 @@
 													Edit
 												</Button>
 												<Button
-													variant="destructive"
+													variant="danger"
 													size="sm"
 													on:click={() => handleDelete(entry.id)}
 													disabled={$glossaryStore.loading}

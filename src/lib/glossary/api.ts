@@ -1,65 +1,86 @@
-import { supabaseClient } from '../supabaseClient';
 import type { GlossaryEntry } from '../../types/glossary';
-import type { SupabaseClient } from '@supabase/supabase-js';
 
-export async function getGlossaryEntries({
-	client = supabaseClient
-}: { client?: SupabaseClient } = {}): Promise<GlossaryEntry[]> {
-	// Join with modules to get module name
-	const { data, error } = await client
-		.from('glossary')
-		.select('*, modules(name)');
-	if (error) throw error;
-	// Map module name for display
-	return (data ?? []).map((entry: any) => ({
-		...entry,
-		module_name: entry.modules?.name || null
-	}));
+export async function getGlossaryEntries(): Promise<GlossaryEntry[]> {
+	const response = await fetch('/glossary');
+	if (!response.ok) {
+		throw new Error(`Failed to fetch glossary entries: ${response.status} ${response.statusText}`);
+	}
+	return response.json();
 }
 
-export async function getModules({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<{ id: string; name: string; description?: string }[]> {
-	const { data, error } = await client.from('modules').select('*').order('name');
-	if (error) throw error;
-	return data ?? [];
+export async function getModules(): Promise<{ id: string; name: string; description?: string }[]> {
+	const response = await fetch('/api/modules');
+	if (!response.ok) {
+		throw new Error(`Failed to fetch modules: ${response.status} ${response.statusText}`);
+	}
+	return response.json();
 }
 
 export async function createGlossaryEntry(
-	entry: Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	entry: Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>
 ): Promise<GlossaryEntry> {
-	const { data, error } = await client.from('glossary').insert([entry]).select('*, modules(name)').single();
-	if (error) throw error;
-	return { ...data, module_name: data.modules?.name || null };
+	const response = await fetch('/glossary', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(entry),
+	});
+	
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to create glossary entry: ${response.status} ${response.statusText} - ${errorText}`);
+	}
+	
+	return response.json();
 }
 
 export async function updateGlossaryEntry(
 	id: string,
-	entry: Partial<Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>>,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	entry: Partial<Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>>
 ): Promise<GlossaryEntry> {
-	const { data, error } = await client.from('glossary').update(entry).eq('id', id).select('*, modules(name)').single();
-	if (error) throw error;
-	return { ...data, module_name: data.modules?.name || null };
+	const response = await fetch('/glossary', {
+		method: 'PUT',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ id, ...entry }),
+	});
+	
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to update glossary entry: ${response.status} ${response.statusText} - ${errorText}`);
+	}
+	
+	return response.json();
 }
 
-export async function deleteGlossaryEntry(
-	id: string,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
-): Promise<void> {
-	const { error } = await client.from('glossary').delete().eq('id', id);
-	if (error) throw error;
+export async function deleteGlossaryEntry(id: string): Promise<void> {
+	const response = await fetch('/glossary', {
+		method: 'DELETE',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ id }),
+	});
+	
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to delete glossary entry: ${response.status} ${response.statusText} - ${errorText}`);
+	}
 }
 
-export async function updateLastUsed(
-	id: string,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
-): Promise<void> {
-	const { error } = await client
-		.from('glossary_terms')
-		.update({
-			last_used: new Date().toISOString()
-		})
-		.eq('id', id);
-
-	if (error) throw error;
+export async function updateLastUsed(id: string): Promise<void> {
+	const response = await fetch('/glossary', {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ id, action: 'updateLastUsed' }),
+	});
+	
+	if (!response.ok) {
+		const errorText = await response.text();
+		throw new Error(`Failed to update last used: ${response.status} ${response.statusText} - ${errorText}`);
+	}
 } 
