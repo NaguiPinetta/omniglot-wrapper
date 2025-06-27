@@ -275,7 +275,7 @@
                     <option value="">Select a model</option>
                     {#each filteredModels as model}
                       <option value={model.id}>{getModelDisplayName(model)}</option>
-                    {/each}
+                      {/each}
                   </select>
                   {#if apiKey}
                     <p class="text-xs text-gray-500 mt-1">API Key: {apiKey.key_value.slice(0, 4)}***{apiKey.key_value.slice(-4)}</p>

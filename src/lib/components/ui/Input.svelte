@@ -24,7 +24,7 @@
 	{disabled}
 	{type}
 	{placeholder}
-	{value}
+	bind:value
 	{name}
 	{id}
 	{required}

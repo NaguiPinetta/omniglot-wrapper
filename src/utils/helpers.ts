@@ -154,7 +154,35 @@ export function getLanguageName(code: string): string {
     'ja': 'Japanese',
     'ko': 'Korean',
     'ar': 'Arabic',
-    'hi': 'Hindi'
+    'hi': 'Hindi',
+    'da': 'Danish',
+    'pl': 'Polish'
   };
   return languages[code] || code;
+}
+
+/**
+ * Get all supported languages as options for dropdowns
+ */
+export function getLanguageOptions(): Array<{ code: string; name: string }> {
+  const languages: Record<string, string> = {
+    'en': 'English',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'zh': 'Chinese',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'ar': 'Arabic',
+    'hi': 'Hindi',
+    'da': 'Danish',
+    'pl': 'Polish'
+  };
+  
+  return Object.entries(languages)
+    .map(([code, name]) => ({ code, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 } 

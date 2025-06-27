@@ -77,7 +77,7 @@ export async function executeAgent(
 ): Promise<AgentResponse> {
   // First get the agent configuration
   const agent = await getAgent(agentId, { client: options.client });
-
+  
   // Prepare messages array
   const messages = options.messages || [
     { role: 'system', content: agent.prompt },

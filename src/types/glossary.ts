@@ -7,6 +7,11 @@ export interface GlossaryEntry {
   context?: string;
   last_used?: string;
   created_at?: string;
+  module_id?: string;
+  module_name?: string;
+  type?: string;
+  description?: string;
+  exceptions?: Record<string, string>;
 }
 
 export interface GlossaryStore {
@@ -21,4 +26,8 @@ export interface GlossaryFormData {
   note?: string;
   language?: string;
   context?: string;
+  module_id?: string;
+  type?: string;
+  description?: string;
+  exceptions?: Record<string, string>;
 } 

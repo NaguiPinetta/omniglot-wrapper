@@ -12,6 +12,13 @@
 		DialogTrigger
 	} from '$lib/components/ui/dialog';
 	import type { GlossaryFormData, GlossaryEntry } from '../../types/glossary';
+	import { getModules } from '$lib/glossary/api';
+	import { getLanguageOptions } from '../../utils/helpers';
+
+	// New: modules and filter state
+	export let data: { entries: GlossaryEntry[]; modules: any[]; error: string | null };
+	let modules = data.modules || [];
+	let moduleFilter: string = '';
 
 	let showAddDialog = false;
 	let isEditing = false;
@@ -21,8 +28,18 @@
 		translation: '',
 		note: '',
 		language: 'es',
-		context: ''
+		context: '',
+		module_id: '',
+		type: '',
+		description: '',
+		exceptions: {}
 	};
+
+	let showAddModule = false;
+	let newModuleName = '';
+	let newModuleDescription = '';
+	let addModuleError = '';
+	let moduleDropdownOpen = false;
 
 	onMount(() => {
 		glossaryStore.loadEntries();
@@ -53,6 +70,49 @@
 			await glossaryStore.deleteEntry(id);
 		}
 	}
+
+	// Helper for exceptions JSON input
+	let exceptionsInput = '';
+	function syncExceptionsToInput() {
+		exceptionsInput = JSON.stringify(editingEntry.exceptions || {}, null, 2);
+	}
+	function syncInputToExceptions() {
+		try {
+			editingEntry.exceptions = JSON.parse(exceptionsInput);
+		} catch {}
+	}
+
+	async function handleAddModule() {
+		addModuleError = '';
+		if (!newModuleName.trim()) {
+			addModuleError = 'Module name is required.';
+			return;
+		}
+		// Call API to add module
+		try {
+			const res = await fetch('/api/modules', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: newModuleName, description: newModuleDescription })
+			});
+			const data = await res.json();
+			if (data.error) {
+				addModuleError = data.error;
+				return;
+			}
+			modules = await getModules({});
+			editingEntry.module_id = data.module.id;
+			showAddModule = false;
+			newModuleName = '';
+			newModuleDescription = '';
+		} catch (e) {
+			addModuleError = 'Failed to add module.';
+		}
+	}
+
+	async function refreshModules() {
+		modules = await getModules({});
+	}
 </script>
 
 <svelte:head>
@@ -60,8 +120,24 @@
 </svelte:head>
 
 <main class="container mx-auto px-4 py-8">
-	<h1 class="text-3xl font-bold mb-6">Glossary Management</h1>
-	<p class="text-gray-600 mb-8">Upload and manage key term translations</p>
+	<div class="flex items-center justify-between mb-8">
+		<div>
+			<h1 class="text-3xl font-bold">Glossary Management</h1>
+			<p class="text-gray-600 mt-1">Upload and manage key term translations</p>
+		</div>
+		<Button on:click={() => { editingEntry = { term: '', translation: '', note: '', language: 'es', context: '', module_id: '', type: '', description: '', exceptions: {} }; isEditing = false; currentEditId = null; showAddDialog = true; }}>
+			Add Term
+		</Button>
+	</div>
+	<div class="flex gap-4 items-center mb-4">
+		<label class="text-sm font-medium">Filter by Module:</label>
+		<select bind:value={moduleFilter} class="border rounded px-2 py-1">
+			<option value="">All Modules</option>
+			{#each modules as mod}
+				<option value={mod.id}>{mod.name}</option>
+			{/each}
+		</select>
+	</div>
 
 	{#if $glossaryStore.error}
 		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
@@ -84,7 +160,7 @@
 							<Button
 								variant="default"
 								on:click={() => {
-									editingEntry = { term: '', translation: '', note: '', language: 'es', context: '' };
+									editingEntry = { term: '', translation: '', note: '', language: 'es', context: '', module_id: '', type: '', description: '', exceptions: {} };
 									isEditing = false;
 									currentEditId = null;
 								}}
@@ -93,7 +169,7 @@
 								Add Entry
 							</Button>
 						</DialogTrigger>
-						<DialogContent>
+						<DialogContent class="bg-white dark:bg-zinc-950 shadow-lg rounded-lg p-6 w-full max-w-lg mx-auto">
 							<DialogHeader>
 								<DialogTitle>{isEditing ? 'Edit Entry' : 'Add New Entry'}</DialogTitle>
 							</DialogHeader>
@@ -108,15 +184,21 @@
 									/>
 								</div>
 								<div>
-									<label for="translation" class="block text-sm font-medium text-gray-700"
-										>Translation</label
-									>
+									<label for="translation" class="block text-sm font-medium text-gray-700">Translation</label>
 									<Input
 										type="text"
 										id="translation"
 										bind:value={editingEntry.translation}
 										disabled={$glossaryStore.loading}
 									/>
+								</div>
+								<div>
+									<label for="language" class="block text-sm font-medium text-gray-700">Language</label>
+									<select id="language" bind:value={editingEntry.language} class="w-full border rounded px-2 py-1">
+										{#each getLanguageOptions() as lang}
+											<option value={lang.code}>{lang.name} ({lang.code})</option>
+										{/each}
+									</select>
 								</div>
 								<div>
 									<label for="context" class="block text-sm font-medium text-gray-700">Context</label>
@@ -136,6 +218,33 @@
 										bind:value={editingEntry.note}
 										disabled={$glossaryStore.loading}
 									/>
+								</div>
+								<div>
+									<label class="block text-sm font-medium">Module</label>
+									<select
+										bind:value={editingEntry.module_id}
+										class="w-full border rounded px-2 py-1"
+										on:focus={() => { refreshModules(); moduleDropdownOpen = true; }}
+										on:blur={() => { moduleDropdownOpen = false; }}
+									>
+										<option value="">None</option>
+										{#each modules as mod}
+											<option value={mod.id}>{mod.name}</option>
+										{/each}
+									</select>
+								</div>
+								<div>
+									<label class="block text-sm font-medium">Type</label>
+									<Input type="text" bind:value={editingEntry.type} />
+								</div>
+								<div>
+									<label class="block text-sm font-medium">Description</label>
+									<Input type="text" bind:value={editingEntry.description} />
+								</div>
+								<div>
+									<label class="block text-sm font-medium">Exceptions (JSON)</label>
+									<Textarea bind:value={exceptionsInput} rows={3} on:input={syncInputToExceptions} on:blur={syncInputToExceptions} />
+									<Button size="xs" variant="secondary" on:click={syncExceptionsToInput}>Sync from object</Button>
 								</div>
 							</div>
 							<div class="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
@@ -175,6 +284,10 @@
 									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Target</th>
 									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Language</th>
 									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Context</th>
+									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Module</th>
+									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Type</th>
+									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Description</th>
+									<th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Exceptions</th>
 									<th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6">
 										<span class="sr-only">Actions</span>
 									</th>
@@ -194,12 +307,16 @@
 										</td>
 									</tr>
 								{:else}
-									{#each $glossaryStore.entries as entry (entry.id)}
+									{#each (moduleFilter ? $glossaryStore.entries.filter(e => e.module_id === moduleFilter) : $glossaryStore.entries) as entry (entry.id)}
 										<tr>
 											<td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-900">{entry.term}</td>
 											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-900">{entry.translation}</td>
 											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{entry.language || 'es'}</td>
 											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{entry.context || entry.note || '-'}</td>
+											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{entry.module_name}</td>
+											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{entry.type}</td>
+											<td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{entry.description}</td>
+											<td><pre class="text-xs max-w-xs whitespace-pre-wrap">{entry.exceptions ? Object.keys(entry.exceptions).join(', ') : ''}</pre></td>
 											<td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
 												<Button
 													variant="secondary"

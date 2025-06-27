@@ -7,6 +7,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { getLanguageOptions } from '../../utils/helpers';
 	import type { JobFormData, Job } from '../../types/jobs';
 	import type { PageData } from './$types';
 
@@ -697,15 +698,9 @@
 						<label for="target_language" class="block text-sm font-medium mb-1">Target Language</label>
 						<select id="target_language" bind:value={formData.target_language} required class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm">
 							<option value="">Select a language</option>
-							<option value="it">Italian (it)</option>
-							<option value="es">Spanish (es)</option>
-							<option value="fr">French (fr)</option>
-							<option value="de">German (de)</option>
-							<option value="pt">Portuguese (pt)</option>
-							<option value="zh">Chinese (zh)</option>
-							<option value="ja">Japanese (ja)</option>
-							<option value="ru">Russian (ru)</option>
-							<!-- Add more as needed -->
+							{#each getLanguageOptions() as lang}
+								<option value={lang.code}>{lang.name} ({lang.code})</option>
+							{/each}
 						</select>
 						<p class="text-xs text-gray-500 mt-1">Select the target language for translation.</p>
 					</div>

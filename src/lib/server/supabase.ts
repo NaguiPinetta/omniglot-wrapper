@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { env } from '$env/dynamic/public';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '$env/static/private';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const createServerSupabaseClient = (fetch: typeof globalThis.fetch): SupabaseClient => {
@@ -13,7 +13,10 @@ export const createServerSupabaseClient = (fetch: typeof globalThis.fetch): Supa
 		return fetch(input, init);
 	};
 
-	return createClient(env.PUBLIC_SUPABASE_URL!, env.PUBLIC_SUPABASE_ANON_KEY!, {
+	console.log('DEBUG: SUPABASE_URL:', SUPABASE_URL);
+	console.log('DEBUG: SUPABASE_ANON_KEY:', SUPABASE_ANON_KEY);
+
+	return createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
 		global: {
 			fetch: wrappedFetch
 		}
