@@ -12,11 +12,11 @@ const ChatRequestSchema = z.object({
   glossary: z.array(z.object({
     term: z.string(),
     translation: z.string(),
-    language: z.string().optional(),
-    context: z.string().optional(),
-    note: z.string().optional(),
-    type: z.string().optional(),
-    description: z.string().optional()
+    language: z.string().nullable().optional(),
+    context: z.string().nullable().optional(),
+    note: z.string().nullable().optional(),
+    type: z.string().nullable().optional(),
+    description: z.string().nullable().optional()
   })).optional()
 });
 

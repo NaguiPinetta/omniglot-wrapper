@@ -202,8 +202,18 @@ export async function startJob(
 	}, { client });
 
 	console.log('Job successfully updated to running, starting background processing...');
-	// Process job in the background (fire and forget)
-	processJobInBackground(id, { client });
+	// Process job in the background (fire and forget) with error handling
+	processJobInBackground(id, { client }).catch(error => {
+		console.error(`Background processing failed for job ${id}:`, error);
+		// Mark job as failed if background processing fails
+		updateJob(id, {
+			status: 'failed',
+			completed_at: new Date().toISOString(),
+			error: error instanceof Error ? error.message : 'Background processing failed'
+		}, { client }).catch(updateError => {
+			console.error(`Failed to update job ${id} status after background processing failure:`, updateError);
+		});
+	});
 
 	return updatedJob;
 }
@@ -276,10 +286,12 @@ async function processJobInBackground(
 			}
 		}
 
+		// Process the dataset and perform translations
+		console.log('Starting actual translation processing...');
+		
 		// Determine file type and parse content accordingly
 		let allRows: Record<string, string>[] = [];
 		let isXmlDataset = false;
-		let originalRows: Record<string, string>[] = [];
 		
 		// Detect file type from dataset
 		if (dataset.file_type === 'xml' || (dataset.file_name && dataset.file_name.toLowerCase().endsWith('.xml'))) {
@@ -310,14 +322,13 @@ async function processJobInBackground(
 			console.log('[DEBUG] Parsed XML rows:', rows);
 			allRows = rows;
 		} else if (dataset.file_content) {
+			// Parse CSV content
+			const Papa = await import('papaparse');
 			const parsed = Papa.parse(dataset.file_content, { header: true });
-			originalRows = (parsed.data as Record<string, string>[]).filter(row =>
+			const originalRows = (parsed.data as Record<string, string>[]).filter(row =>
 				Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
 			);
 			allRows = originalRows;
-			// Store original headers and delimiter for export
-			var originalHeaders = parsed.meta.fields || [];
-			var originalDelimiter = parsed.meta.delimiter || ',';
 		}
 
 		const totalRows = allRows.length;
@@ -327,9 +338,15 @@ async function processJobInBackground(
 		let totalTokens = 0;
 		let totalCost = 0;
 
-		const columnMapping: ColumnMapping = job.column_mapping || { source_text_column: '' };
+		const columnMapping = job.column_mapping || { source_text_column: '' };
 		const targetLang = job.target_language;
 		if (!targetLang) throw new Error('No target language selected for this job.');
+
+		// Update job with total items
+		await updateJob(jobId, {
+			total_items: totalRows,
+			progress: 0
+		}, { client });
 
 		for (let i = 0; i < totalRows; i++) {
 			job = await getJob(jobId, { client });
@@ -337,6 +354,7 @@ async function processJobInBackground(
 				console.log('Job was cancelled, stopping processing');
 				break;
 			}
+			
 			try {
 				const row = allRows[i];
 				
@@ -350,7 +368,6 @@ async function processJobInBackground(
 					sourceText = row.value || '';
 					rowId = row.key || `xml_entry_${i + 1}`;
 					sourceLang = job.source_language || 'en';
-					console.log(`[DEBUG] XML row ${i}: rowId=${rowId}, sourceText='${sourceText}'`);
 				} else {
 					// For CSV, use column mapping
 					sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
@@ -376,195 +393,144 @@ async function processJobInBackground(
 					let systemPrompt = agent.prompt;
 					if (glossaryEntries.length > 0) {
 						const glossaryText = glossaryEntries
-							.map(entry => {
-								const contextPart = entry.context ? ` [Context: ${entry.context}]` : '';
-								return `* ${entry.term} ➔ ${entry.translation}${contextPart}`;
-							})
+							.map(entry => `${entry.term} → ${entry.translation}${entry.context ? ` (${entry.context})` : ''}`)
 							.join('\n');
-						
-						// Format glossary instruction based on usage mode
-						let glossaryInstruction = '';
-						if (job.glossary_usage_mode === 'enforce') {
-							glossaryInstruction = '\n\nUse these preferred terms in translations. You MUST use these exact translations when these terms appear:\n' + glossaryText;
-						} else if (job.glossary_usage_mode === 'prefer') {
-							glossaryInstruction = '\n\nUse these preferred terms in translations when applicable:\n' + glossaryText;
-						}
-						
-						systemPrompt += glossaryInstruction;
-						console.log('Enhanced system prompt with glossary:', systemPrompt);
+						systemPrompt += `\n\nGlossary terms to use:\n${glossaryText}`;
 					}
 
+					// Prepare messages for translation
 					const messages = [
-						{ role: 'system', content: systemPrompt },
-						{ role: 'user', content: `Translate from ${sourceLang} to ${targetLang}:
-${sourceText}` }
+						{
+							role: 'system',
+							content: systemPrompt
+						},
+						{
+							role: 'user',
+							content: `Translate the following text from ${sourceLang} to ${targetLang}:\n\n${sourceText}`
+						}
 					];
-					
-					const requestBody: any = { 
-						model: model.name, 
-						messages, 
-						api_key: apiKey 
-					};
-				
-					// Include glossary in the request for API tracking/debugging
-					if (glossaryEntries.length > 0) {
-						requestBody.glossary = glossaryEntries;
-					}
 
+					// Make API call to translation service
 					const response = await fetch('/api/chat', {
 						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(requestBody)
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify({
+							model: model.name,
+							messages: messages,
+							api_key: apiKey,
+							glossary: glossaryEntries
+						})
 					});
-					const data = await response.json();
-					targetText = data.choices?.[0]?.message?.content || data.content || '';
 
-					// Track token usage
-					const tokens = data.usage?.total_tokens || 0;
-					totalTokens += tokens;
-					// Calculate cost if model has cost per token
-					const inputCost = model.input_cost_per_token || 0;
-					const outputCost = model.output_cost_per_token || 0;
-					const cost = tokens * (inputCost + outputCost);
-					totalCost += cost;
-				} catch (error) {
+					if (!response.ok) {
+						throw new Error(`Translation API error: ${response.status}`);
+					}
+
+					const result = await response.json();
+					targetText = result.choices?.[0]?.message?.content || '';
+					
+					// Estimate tokens and cost (simplified)
+					const estimatedTokens = Math.ceil((sourceText.length + targetText.length) / 4);
+					totalTokens += estimatedTokens;
+					totalCost += estimatedTokens * 0.0001; // Rough estimate
+
+				} catch (translationError) {
+					console.error(`Translation failed for row ${i + 1}:`, translationError);
 					const skipInfo = {
 						row_id: rowId,
 						row_number: i + 1,
-						reason: error instanceof Error ? error.message : 'Unknown error',
-						data: row,
-						target_language: targetLang
+						reason: `Translation failed: ${translationError.message}`,
+						data: row
 					};
-					console.log('Skipping row:', skipInfo);
 					skippedRows.push(skipInfo);
-					targetText = '';
+					continue;
 				}
 
-				// Append translation to the row
-				if (isXmlDataset) {
-					// For XML, add translated value
-					row[`translated_${targetLang}`] = targetText;
-				} else {
-					// For CSV, retain all original columns and append 'Translated Text'
-					let translatedText = targetText;
-					if (!translatedText || translatedText.trim() === '') {
-						translatedText = skippedRows.some(s => s.row_id === rowId) ? 'ERROR' : '';
-					}
-					completedRows.push({
-						...originalRows[i],
-						'Translated Text': translatedText
-					});
-				}
-				
-				// Insert translation result into the translations table
-				await client.from('translations').insert([
-					{
+				// Save translation result
+				const translationResult = {
 					job_id: jobId,
-					source_text: sourceText,
-						target_text: targetText,
-						source_language: sourceLang,
-						target_language: targetLang,
-						confidence: 1,
-					status: 'completed',
-						error: null,
-						created_at: new Date().toISOString(),
-						updated_at: new Date().toISOString(),
-					row_id: rowId
-					}
-				]);
-				processedCount++;
-				
-				// Update progress
-				await updateJob(jobId, { 
-					processed_items: processedCount, 
-					progress: Math.round((processedCount / totalRows) * 100)
-				}, { client });
-
-			} catch (error) {
-				const rowId = isXmlDataset ? 
-					(allRows[i].key || `xml_entry_${i + 1}`) : 
-					(columnMapping.row_id_column ? allRows[i][columnMapping.row_id_column] : `row_${i + 1}`);
-				const skipInfo = {
 					row_id: rowId,
+					source_text: sourceText,
+					target_text: targetText,
+					source_language: sourceLang,
+					target_language: targetLang,
+					status: 'completed',
+					confidence: 0.95, // Default confidence
+					created_at: new Date().toISOString()
+				};
+
+				const { error: insertError } = await client
+					.from('translations')
+					.insert([translationResult]);
+
+				if (insertError) {
+					console.error('Failed to save translation:', insertError);
+					const skipInfo = {
+						row_id: rowId,
+						row_number: i + 1,
+						reason: `Database save failed: ${insertError.message}`,
+						data: row
+					};
+					skippedRows.push(skipInfo);
+					continue;
+				}
+
+				completedRows.push(translationResult);
+				processedCount++;
+
+				// Update progress every 10 rows or on last row
+				if (processedCount % 10 === 0 || i === totalRows - 1) {
+					const progress = Math.round((i + 1) / totalRows * 100);
+					await updateJob(jobId, {
+						progress: progress,
+						processed_items: processedCount,
+						failed_items: skippedRows.length,
+						total_tokens: totalTokens,
+						total_cost: totalCost
+					}, { client });
+					console.log(`Progress: ${progress}% (${processedCount}/${totalRows} completed, ${skippedRows.length} skipped)`);
+				}
+
+			} catch (rowError) {
+				console.error(`Error processing row ${i + 1}:`, rowError);
+				const skipInfo = {
+					row_id: `row_${i + 1}`,
 					row_number: i + 1,
-					reason: `Processing error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+					reason: `Processing error: ${rowError.message}`,
 					data: allRows[i]
 				};
-				console.log('Skipping row:', skipInfo);
 				skippedRows.push(skipInfo);
-				await updateJob(jobId, { failed_items: (job.failed_items || 0) + 1 }, { client });
 			}
 		}
 
-		// Update job status and counts
+		// Final job completion
 		await updateJob(jobId, {
 			status: 'completed',
+			progress: 100,
 			completed_at: new Date().toISOString(),
 			processed_items: processedCount,
 			failed_items: skippedRows.length,
-			progress: Math.round((processedCount / totalRows) * 100),
 			total_tokens: totalTokens,
-			total_cost: totalCost
+			total_cost: totalCost,
+			skipped_rows: skippedRows.length > 0 ? skippedRows : null
 		}, { client });
-		console.log(`Job ${jobId} marked as completed. Processed: ${processedCount}, Skipped: ${skippedRows.length}`);
-
-		// After processing all rows, store completedRows for CSV jobs
-		if (!isXmlDataset && dataset.file_content) {
-			const parsed = Papa.parse(dataset.file_content, { header: true });
-			const originalRows = parsed.data as Record<string, string>[];
-			allRows = originalRows;
-			for (let i = 0; i < originalRows.length; i++) {
-				const row = originalRows[i];
-				let sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
-				let rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${i + 1}`;
-				let sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
-				let translatedText = '';
-				let skipReason = '';
-				if (!sourceText || sourceText.trim() === '') {
-					skipReason = 'Empty source text';
-					skippedRows.push({ row_id: rowId, row_number: i + 1, reason: skipReason, data: row });
-				} else {
-					try {
-						const messages = [
-							{ role: 'system', content: agent.prompt },
-							{ role: 'user', content: `Translate from ${sourceLang} to ${targetLang}:
-${sourceText}` }
-						];
-						const response = await fetch('/api/chat', {
-							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({ model: model.name, messages, api_key: apiKey })
-						});
-						const data = await response.json();
-						translatedText = data.choices?.[0]?.message?.content || data.content || '';
-						// Track token usage, cost, etc. (existing logic)
-					} catch (error) {
-						skipReason = error instanceof Error ? error.message : 'Unknown error';
-						skippedRows.push({ row_id: rowId, row_number: i + 1, reason: skipReason, data: row });
-						translatedText = '';
-					}
-				}
-				// Always push a row for every original row, preserving order
-				completedRows.push({
-					...row,
-					'Translated Text': translatedText || (skipReason ? 'ERROR' : '')
-				});
-			}
-			// Add logging for debugging completedRows saving
-			try {
-				console.log('About to save completedRows:', completedRows.length, completedRows[0]);
-				await updateJob(jobId, { completed_rows: completedRows }, { client });
-				console.log('Saved completedRows successfully');
-			} catch (err) {
-				console.error('Failed to save completedRows:', err);
-			}
-		}
+		
+		console.log(`Job ${jobId} completed successfully: ${processedCount} processed, ${skippedRows.length} skipped`);
+		
 	} catch (error) {
-		console.error('Job processing failed:', error);
-		await updateJob(jobId, {
-			status: 'failed',
-			error: error instanceof Error ? error.message : 'Unknown error',
-			completed_at: new Date().toISOString()
-		}, { client });
+		console.error(`Error processing job ${jobId}:`, error);
+		// Mark job as failed
+		try {
+			await updateJob(jobId, {
+				status: 'failed',
+				completed_at: new Date().toISOString(),
+				error: error instanceof Error ? error.message : 'Unknown error during processing'
+			}, { client });
+			console.log(`Job ${jobId} marked as failed due to error`);
+		} catch (updateError) {
+			console.error(`Failed to update job ${jobId} status to failed:`, updateError);
+		}
 	}
 } 

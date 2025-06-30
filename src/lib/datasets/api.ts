@@ -1,23 +1,40 @@
-import { supabaseClient } from '../supabaseClient';
+import { supabase } from '../auth/client';
 import type { Dataset, DatasetPreview, DatasetUploadResponse, DatasetFormData } from '../../types/datasets';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { XMLParser } from 'fast-xml-parser';
 
-// Helper function to get current user ID
+// Helper function to get current user ID - use the authenticated client
 async function getCurrentUserId(client: SupabaseClient): Promise<string> {
-  const { data: { session } } = await client.auth.getSession();
-  if (!session?.user?.id) {
-    throw new Error('User not authenticated');
-  }
-  return session.user.id;
+	console.log('Getting current user ID for dataset...');
+	
+	// Try to get user from session first
+	const { data: { session }, error: sessionError } = await client.auth.getSession();
+	console.log('Session check:', { session: !!session, user: session?.user?.email, error: sessionError });
+	
+	if (session?.user?.id) {
+		console.log('Found user ID from session:', session.user.id);
+		return session.user.id;
+	}
+	
+	// Fallback: try to get user directly
+	const { data: { user }, error: userError } = await client.auth.getUser();
+	console.log('User check:', { user: user?.email, error: userError });
+	
+	if (user?.id) {
+		console.log('Found user ID from getUser:', user.id);
+		return user.id;
+	}
+	
+	console.error('Authentication failed - no user found for dataset');
+	throw new Error('User not authenticated. Please log in again.');
 }
 
 // --- Database CRUD Functions ---
 
 export async function getDatasets({
-	client = supabaseClient
+	client = supabase
 }: { client?: SupabaseClient } = {}): Promise<Dataset[]> {
 	const { data, error } = await client.from('datasets').select('*').order('uploaded_at', { ascending: false });
 	if (error) throw error;
@@ -54,7 +71,7 @@ export async function getDatasets({
 
 export async function getDataset(
 	id: string,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	{ client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<Dataset> {
 	const { data, error } = await client.from('datasets').select('*, file_content').eq('id', id).single();
 	if (error) throw error;
@@ -89,7 +106,7 @@ export async function getDataset(
 
 export async function createDataset(
 	dataset: Omit<Dataset, 'id' | 'created_at'>,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	{ client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<Dataset> {
 	const { data, error } = await client.from('datasets').insert([dataset]).select().single();
 	if (error) throw error;
@@ -99,7 +116,7 @@ export async function createDataset(
 export async function updateDataset(
 	id: string,
 	updates: Partial<Dataset>,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	{ client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<Dataset> {
 	const { data, error } = await client.from('datasets').update(updates).eq('id', id).select().single();
 	if (error) throw error;
@@ -108,7 +125,7 @@ export async function updateDataset(
 
 export async function deleteDataset(
 	id: string,
-	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+	{ client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<void> {
 	// First, get the dataset to retrieve the file name for storage deletion
 	const dataset = await getDataset(id, { client });
@@ -239,56 +256,107 @@ export async function previewFile(file: File): Promise<DatasetPreview> {
 
 export async function uploadAndCreateDataset(
   formData: DatasetFormData,
-  { client = supabaseClient }: { client?: SupabaseClient } = {}
+  { client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<DatasetUploadResponse> {
-  if (!formData.file) throw new Error('No file provided');
+  console.log('=== DATASET UPLOAD DEBUG START ===');
+  console.log('FormData received:', { 
+    name: formData.name, 
+    description: formData.description, 
+    hasFile: !!formData.file,
+    fileName: formData.file?.name,
+    fileSize: formData.file?.size 
+  });
+  
+  if (!formData.file) {
+    console.error('No file provided');
+    throw new Error('No file provided');
+  }
 
   const file = formData.file;
-  const preview = await previewFile(file);
+  console.log('File details:', { name: file.name, size: file.size, type: file.type });
   
-  // Store the actual CSV content as text for later access
-  const fileContent = await file.text();
-  
-  // For now, we'll create a dataset record with the file content stored
-  const { data, error } = await client.from('datasets').insert([{
-    name: formData.name,
-    row_count: preview.totalRows,
-    file_url: `${file.name}`, // Store original filename
-    file_content: fileContent, // Store the actual file content
-    columns: preview.headers // Store column headers
-  }]).select().single();
-  
-  if (error) throw error;
+  try {
+    console.log('Generating file preview...');
+    const preview = await previewFile(file);
+    console.log('Preview generated:', { headers: preview.headers, totalRows: preview.totalRows });
+    
+    // Store the actual CSV content as text for later access
+    console.log('Reading file content...');
+    const fileContent = await file.text();
+    console.log('File content length:', fileContent.length);
+    
+    // Get user ID for the dataset
+    console.log('Getting current user ID...');
+    const userId = await getCurrentUserId(client);
+    console.log('User ID obtained:', userId);
+    
+    // Prepare dataset record
+    const datasetRecord = {
+      name: formData.name,
+      row_count: preview.totalRows,
+      file_url: `${file.name}`, // Store original filename
+      file_content: fileContent, // Store the actual file content
+      columns: preview.headers, // Store column headers
+      user_id: userId // Include user_id in the insert
+    };
+    
+    console.log('Dataset record to insert:', {
+      ...datasetRecord,
+      file_content: `[${datasetRecord.file_content.length} characters]` // Don't log full content
+    });
+    
+    // Create a dataset record with the file content stored
+    console.log('Inserting dataset into database...');
+    const { data, error } = await client.from('datasets').insert([datasetRecord]).select().single();
+    
+    console.log('Database insert result:', { data: !!data, error });
+    if (error) {
+      console.error('Database insert error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      throw error;
+    }
 
-  // Map the response to match the expected Dataset interface
-  const dataset: Dataset = {
-    id: data.id,
-    name: data.name,
-    description: formData.description || '',
-    file_name: file.name,
-    file_size: file.size,
-    file_type: getFileType(file.name),
-    row_count: preview.totalRows,
-    columns: preview.headers,
-    status: 'ready',
-    user_id: await getCurrentUserId(client),
-    created_at: data.uploaded_at || new Date().toISOString(),
-    updated_at: data.uploaded_at || new Date().toISOString(),
-    file_url: data.file_url,
-    file_content: data.file_content
-  };
+    console.log('Dataset created successfully:', data.id);
 
-  return {
-    dataset,
-    preview
-  };
+    // Map the response to match the expected Dataset interface
+    const dataset: Dataset = {
+      id: data.id,
+      name: data.name,
+      description: formData.description || '',
+      file_name: file.name,
+      file_size: file.size,
+      file_type: getFileType(file.name),
+      row_count: preview.totalRows,
+      columns: preview.headers,
+      status: 'ready',
+      user_id: userId,
+      created_at: data.uploaded_at || new Date().toISOString(),
+      updated_at: data.uploaded_at || new Date().toISOString(),
+      file_url: data.file_url,
+      file_content: data.file_content
+    };
+
+    console.log('=== DATASET UPLOAD DEBUG END (SUCCESS) ===');
+    return {
+      dataset,
+      preview
+    };
+  } catch (error) {
+    console.error('=== DATASET UPLOAD DEBUG END (ERROR) ===');
+    console.error('Upload error details:', error);
+    throw error;
+  }
 }
 
 // --- CSV Content Access Functions ---
 
 export async function getDatasetPreview(
   datasetId: string,
-  { client = supabaseClient }: { client?: SupabaseClient } = {}
+  { client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<DatasetPreview> {
   const { data, error } = await client
     .from('datasets')

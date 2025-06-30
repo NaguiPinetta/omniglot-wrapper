@@ -145,7 +145,7 @@
 				return;
 			}
 			await refreshModules();
-			editingEntry.module_id = data.module.id;
+			editingEntry.module_id = data.id;
 			showAddModule = false;
 			newModuleName = '';
 			newModuleDescription = '';
@@ -155,17 +155,25 @@
 	}
 
 	async function refreshModules() {
+		console.log('🔄 Refreshing modules...');
 		try {
 			// Use the API endpoint instead of direct Supabase client
 			const response = await fetch('/api/modules');
+			console.log('📡 API response status:', response.status, response.statusText);
+			
 			const result = await response.json();
-			if (result.error) {
-				console.error('Failed to load modules:', result.error);
+			console.log('📦 API response data:', result);
+			
+			if (!response.ok) {
+				console.error('❌ Failed to load modules:', result.error || 'Unknown error');
 			} else {
-				modules = result.modules || [];
+				// The API returns the modules array directly, not wrapped in an object
+				modules = result || [];
+				console.log('✅ Refreshed modules count:', modules.length);
+				console.log('📋 Module names:', modules.map(m => m.name));
 			}
 		} catch (error) {
-			console.error('Error refreshing modules:', error);
+			console.error('💥 Error refreshing modules:', error);
 		}
 	}
 </script>

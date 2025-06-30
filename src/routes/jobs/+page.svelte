@@ -50,10 +50,10 @@
 		glossaryStore.loadEntries();
 		// Immediately fetch jobs on mount
 		jobStore.loadJobs();
-		// Set up polling every 5 seconds
+		// Set up polling every 30 seconds instead of 5
 		pollingInterval = setInterval(() => {
 			jobStore.loadJobs();
-		}, 5000);
+		}, 30000);
 	});
 
 	onDestroy(() => {
@@ -78,7 +78,7 @@
 			jobs: $jobStore.jobs, 
 			loading: $jobStore.loading, 
 			error: $jobStore.error 
-		});
+		});	
 		
 		// Validate required column mapping
 		if (!columnMapping.source_text_column) {
@@ -110,7 +110,8 @@
 			...formData,
 			glossary_id: formData.glossary_id || null, // Ensure empty string becomes null
 			translation_instructions: finalInstructions,
-			column_mapping: columnMapping
+			column_mapping: columnMapping,
+			glossary_usage_mode: formData.glossary_usage_mode as 'prefer' | 'enforce' | 'ignore'
 		};
 		
 		console.log('Final job data to submit:', enhancedJobData);
@@ -134,7 +135,7 @@
 				resetForm();
 				showModal = false;
 			}
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Exception during job creation:', error);
 			alert(`Failed to create job: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
@@ -220,14 +221,24 @@
 	}
 
 	async function downloadResults(jobId: string) {
+		console.log('=== DOWNLOAD RESULTS DEBUG START ===');
+		console.log('Downloading results for job ID:', jobId);
+		
 		try {
 			const { getJobResults } = await import('../../lib/jobs/api');
+			console.log('Fetching job results...');
 			const results = await getJobResults(jobId);
+			console.log('Job results fetched:', results);
+			
 			const job = $jobStore.jobs.find(j => j.id === jobId);
 			const dataset = $datasetStore.datasets.find(d => d.id === job?.dataset_id);
 			
+			console.log('Found job:', job);
+			console.log('Found dataset:', dataset);
+			
 			if (!job || !dataset) {
 				console.error('Job or dataset not found');
+				alert('Job or dataset not found. Please refresh the page and try again.');
 				return;
 			}
 
@@ -292,44 +303,69 @@
 			document.body.removeChild(a);
 			window.URL.revokeObjectURL(url);
 			} else {
-				// Export as CSV using completed_rows
+				// Export as CSV using translation results from database
 				const Papa = (await import('papaparse')).default;
-				let fileContent = dataset.file_content;
-				let originalHeaders: string[] = [];
-				let originalDelimiter = ',';
-				if (fileContent) {
-					const parsed = Papa.parse(fileContent, { header: true });
-					originalHeaders = parsed.meta.fields || [];
-					originalDelimiter = parsed.meta.delimiter || ',';
-				}
-
-				const completedRows = job.completed_rows || [];
-				if (!completedRows.length) {
-					alert('No completed rows found for this job.');
+				
+				console.log('Downloading CSV results for job:', jobId);
+				console.log('Translation results:', results);
+				
+				if (!results || results.length === 0) {
+					alert('No translation results found for this job.');
 					return;
 				}
 
-				// Ensure all columns are present in the output
-				let headers = completedRows.length > 0 ? Object.keys(completedRows[0]) : [];
-				// Ensure 'Translated Text' is last
-				headers = headers.filter(h => h !== 'Translated Text').concat('Translated Text');
-				const csvContent = Papa.unparse(completedRows, { columns: headers, delimiter: originalDelimiter });
+				// Filter only completed translations
+				const completedTranslations = results.filter(r => r.status === 'completed' && r.target_text);
+				
+				if (completedTranslations.length === 0) {
+					alert('No completed translations found for this job.');
+					return;
+				}
+
+				console.log('Completed translations to download:', completedTranslations);
+
+				// Create CSV data with proper headers
+				const csvData = completedTranslations.map(result => ({
+					'Row ID': result.row_id || '',
+					'Source Text': result.source_text || '',
+					'Target Text': result.target_text || '',
+					'Source Language': result.source_language || '',
+					'Target Language': result.target_language || '',
+					'Confidence': result.confidence ? (result.confidence * 100).toFixed(1) + '%' : '95.0%',
+					'Status': result.status || 'completed',
+					'Created At': result.created_at ? new Date(result.created_at).toLocaleString() : ''
+				}));
+
+				const csvContent = Papa.unparse(csvData, { 
+					delimiter: ',',
+					header: true
+				});
+				
 				// Prepend UTF-8 BOM for Excel compatibility
 				const BOM = '\uFEFF';
 				const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
 				const url = window.URL.createObjectURL(blob);
 				const a = document.createElement('a');
 				a.href = url;
-				a.download = `${job.name || 'job'}_results.csv`;
+				a.download = `${job.name || 'job'}_translations.csv`;
 				document.body.appendChild(a);
 				a.click();
 				document.body.removeChild(a);
 				window.URL.revokeObjectURL(url);
+				
+				console.log(`CSV download initiated: ${completedTranslations.length} translations`);
 			}
 		} catch (error) {
 			console.error('Failed to download results:', error);
-			alert('Failed to download results. Please try again.');
+			console.error('Error details:', {
+				message: error.message,
+				stack: error.stack,
+				jobId: jobId
+			});
+			alert(`Failed to download results: ${error.message}. Check console for details.`);
 		}
+		
+		console.log('=== DOWNLOAD RESULTS DEBUG END ===');
 	}
 
 	async function retryJob(jobId: string) {
@@ -349,10 +385,14 @@
 	}
 
 	async function loadDatasetPreview(datasetId: string) {
+		console.log('=== LOAD DATASET PREVIEW DEBUG START ===');
+		console.log('Loading preview for dataset ID:', datasetId);
+		
 		if (!datasetId) {
 			selectedDatasetPreview = [];
 			availableColumns = [];
 			selectedDataset = null;
+			console.log('No dataset ID provided, clearing preview');
 			return;
 		}
 
@@ -360,18 +400,82 @@
 		try {
 			// Get the selected dataset to check its file type
 			selectedDataset = $datasetStore.datasets.find(d => d.id === datasetId);
+			console.log('Found dataset:', selectedDataset);
 			
-			// Import the getDatasetPreview function to get real data
+			if (!selectedDataset) {
+				throw new Error('Dataset not found in store');
+			}
+			
+			// Try to import and call getDatasetPreview
+			console.log('Importing getDatasetPreview function...');
 			const { getDatasetPreview } = await import('../../lib/datasets/api');
+			console.log('Calling getDatasetPreview...');
 			const preview = await getDatasetPreview(datasetId);
+			console.log('Dataset preview result:', preview);
 			
-			selectedDatasetPreview = preview.rows;
-			availableColumns = preview.headers;
+			selectedDatasetPreview = preview.rows || [];
+			availableColumns = preview.headers || [];
 			
 			console.log('Loaded real dataset preview:', preview);
 			console.log('Available columns:', availableColumns);
 			console.log('Dataset file type:', selectedDataset?.file_type);
 			
+		} catch (error: any) {
+			console.error('getDatasetPreview failed, using fallback:', error);
+			
+			// Fallback: try to parse the dataset content directly
+			try {
+				if (selectedDataset?.file_content) {
+					console.log('Using fallback dataset parsing...');
+					
+					if (selectedDataset.file_type === 'xml') {
+						// Parse XML
+						const { XMLParser } = await import('fast-xml-parser');
+						const parser = new XMLParser({ ignoreAttributes: false });
+						const xml = parser.parse(selectedDataset.file_content);
+						
+						let rows: any[] = [];
+						if (xml.wGlnWirelessResourceDocument && xml.wGlnWirelessResourceDocument.ResourceEntry) {
+							const entries = Array.isArray(xml.wGlnWirelessResourceDocument.ResourceEntry)
+								? xml.wGlnWirelessResourceDocument.ResourceEntry
+								: [xml.wGlnWirelessResourceDocument.ResourceEntry];
+							rows = entries.map((entry: any) => ({
+								key: entry['@_ID'] || '',
+								value: entry['@_Value'] || ''
+							}));
+						}
+						
+						selectedDatasetPreview = rows.slice(0, 10); // First 10 rows
+						availableColumns = ['key', 'value'];
+						console.log('XML fallback successful:', rows.length, 'rows');
+						
+					} else {
+						// Parse CSV
+						const Papa = (await import('papaparse')).default;
+						const parsed = Papa.parse(selectedDataset.file_content, { header: true });
+						const rows = (parsed.data as Record<string, string>[]).filter(row =>
+							Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+						);
+						
+						selectedDatasetPreview = rows.slice(0, 10); // First 10 rows
+						availableColumns = parsed.meta.fields || [];
+						console.log('CSV fallback successful:', rows.length, 'rows');
+					}
+				} else {
+					throw new Error('No file content available for fallback parsing');
+				}
+			} catch (fallbackError: any) {
+				console.error('Fallback parsing also failed:', fallbackError);
+				// Final fallback to empty state
+				selectedDatasetPreview = [];
+				availableColumns = [];
+				selectedDataset = null;
+				alert('Failed to load dataset preview. The dataset may be corrupted or in an unsupported format.');
+			}
+		}
+		
+		// Set up column mapping regardless of how we got the preview
+		if (availableColumns.length > 0) {
 			// Reset column mapping
 			columnMapping = {
 				source_text_column: '',
@@ -387,60 +491,65 @@
 				columnMapping.source_language_column = '';
 			} else {
 				// For CSV, use intelligent column matching
-			const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
-			const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
-			const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
-			
-			// Find the best match for source text column
-			for (const possible of possibleTextColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.source_text_column = match;
-					break;
+				const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
+				const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
+				const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
+				
+				// Find the best match for source text column
+				for (const possible of possibleTextColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.source_text_column = match;
+						break;
+					}
 				}
-			}
-			
-			// If no match found, use the first column as default
-			if (!columnMapping.source_text_column && availableColumns.length > 0) {
-				columnMapping.source_text_column = availableColumns[0];
-			}
-			
-			// Find the best match for row ID column
-			for (const possible of possibleIdColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.row_id_column = match;
-					break;
+				
+				// If no match found, use the first column as default
+				if (!columnMapping.source_text_column && availableColumns.length > 0) {
+					columnMapping.source_text_column = availableColumns[0];
 				}
-			}
-			
-			// Find the best match for language column
-			for (const possible of possibleLanguageColumns) {
-				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-				if (match) {
-					columnMapping.source_language_column = match;
-					break;
+				
+				// Find the best match for row ID column
+				for (const possible of possibleIdColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.row_id_column = match;
+						break;
+					}
+				}
+				
+				// Find the best match for language column
+				for (const possible of possibleLanguageColumns) {
+					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+					if (match) {
+						columnMapping.source_language_column = match;
+						break;
 					}
 				}
 			}
 			
-		} catch (error) {
-			console.error('Failed to load dataset preview:', error);
-			// Fallback to empty state
+			console.log('Column mapping set:', columnMapping);
+		}
+		
+		loadingPreview = false;
+		console.log('=== LOAD DATASET PREVIEW DEBUG END ===');
+	}
+
+	// Manual dataset change handler
+	function handleDatasetChange() {
+		console.log('Dataset changed to:', formData.dataset_id);
+		if (formData.dataset_id) {
+			loadDatasetPreview(formData.dataset_id);
+		} else {
 			selectedDatasetPreview = [];
 			availableColumns = [];
 			selectedDataset = null;
-			
-			// Show user-friendly error message
-			alert('Failed to load dataset preview. The dataset may need to be re-uploaded with the new format.');
-		} finally {
-			loadingPreview = false;
+			columnMapping = {
+				source_text_column: '',
+				source_language_column: '',
+				row_id_column: ''
+			};
 		}
-	}
-
-	// Watch for dataset changes
-	$: if (formData.dataset_id) {
-		loadDatasetPreview(formData.dataset_id);
 	}
 
 	function getPercent(job: Job) {
@@ -488,6 +597,139 @@
 			languages: Array.from(module.languages)
 		}));
 	}
+
+	async function testJobStart() {
+		console.log('=== DIAGNOSTIC JOB START TEST ===');
+		
+		// Find a pending job to test with
+		const pendingJob = $jobStore.jobs.find(job => job.status === 'pending' || job.status === 'queued');
+		
+		if (!pendingJob) {
+			alert('No pending jobs available to test start functionality');
+			return;
+		}
+		
+		try {
+			console.log('Testing job start with job:', pendingJob);
+			console.log('Calling jobStore.startJob...');
+			await jobStore.startJob(pendingJob.id);
+			console.log('Test job start completed successfully');
+			
+			alert(`Test job start completed for job: ${pendingJob.name}`);
+			
+		} catch (error) {
+			console.error('Test job start failed:', error);
+			alert(`Test job start failed: ${error.message}`);
+		}
+		
+		console.log('=== DIAGNOSTIC JOB START TEST END ===');
+	}
+
+	async function testJobCreation() {
+		console.log('=== DIAGNOSTIC JOB CREATION TEST ===');
+		
+		try {
+			// Test with minimal data
+			const testJobData = {
+				name: 'DIAGNOSTIC TEST ' + new Date().toISOString(),
+				description: 'Test job for debugging',
+				agent_id: $agentStore.agents[0]?.id || '',
+				dataset_id: $datasetStore.datasets[0]?.id || '',
+				glossary_id: '',
+				glossary_usage_mode: 'prefer',
+				source_language: 'en',
+				target_language: 'es',
+				translation_instructions: '',
+				column_mapping: {
+					source_text_column: 'text',
+					source_language_column: '',
+					row_id_column: ''
+				}
+			};
+			
+			console.log('Test job data:', testJobData);
+			
+			if (!testJobData.agent_id) {
+				alert('No agents available for testing');
+				return;
+			}
+			
+			if (!testJobData.dataset_id) {
+				alert('No datasets available for testing');
+				return;
+			}
+			
+			console.log('Calling jobStore.addJob...');
+			await jobStore.addJob(testJobData);
+			console.log('Test job creation completed successfully');
+			
+			alert('Test job created successfully!');
+			
+		} catch (error) {
+			console.error('Test job creation failed:', error);
+			alert(`Test job creation failed: ${error.message}`);
+		}
+		
+		console.log('=== DIAGNOSTIC JOB CREATION TEST END ===');
+	}
+
+	async function testDatasetPreview() {
+		console.log('=== DIAGNOSTIC DATASET PREVIEW TEST ===');
+		
+		const dataset = $datasetStore.datasets[0];
+		if (!dataset) {
+			alert('No datasets available for testing');
+			return;
+		}
+		
+		try {
+			console.log('Testing dataset:', dataset);
+			console.log('Dataset file type:', dataset.file_type);
+			console.log('Dataset file name:', dataset.file_name);
+			
+			// Get dataset preview
+			const response = await fetch(`/api/datasets/${dataset.id}/preview`);
+			if (!response.ok) {
+				throw new Error(`Failed to get dataset preview: ${response.status}`);
+			}
+			
+			const preview = await response.json();
+			console.log('Dataset preview:', preview);
+			console.log('Available columns:', Object.keys(preview[0] || {}));
+			
+			alert(`Dataset preview successful! Check console for details.\nColumns: ${Object.keys(preview[0] || {}).join(', ')}`);
+			
+		} catch (error) {
+			console.error('Dataset preview test failed:', error);
+			alert(`Dataset preview test failed: ${error.message}`);
+		}
+		
+		console.log('=== DIAGNOSTIC DATASET PREVIEW TEST END ===');
+	}
+
+	async function testDownload() {
+		console.log('=== DIAGNOSTIC DOWNLOAD TEST ===');
+		
+		// Find a completed job to test with
+		const completedJob = $jobStore.jobs.find(job => job.status === 'completed');
+		
+		if (!completedJob) {
+			alert('No completed jobs available to test download functionality');
+			return;
+		}
+		
+		try {
+			console.log('Testing download with job:', completedJob);
+			await downloadResults(completedJob.id);
+			console.log('Test download completed successfully');
+			
+		} catch (error) {
+			console.error('Test download failed:', error);
+			alert(`Test download failed: ${error.message}`);
+		}
+		
+		console.log('=== DIAGNOSTIC DOWNLOAD TEST END ===');
+	}
 </script>
 
 <svelte:head>
@@ -496,14 +738,13 @@
 
 <main class="container mx-auto px-4 py-8">
 	<div class="flex justify-between items-center mb-6">
-		<div>
-			<h1 class="text-2xl font-bold">Translation Jobs</h1>
-			<p class="text-gray-600">Monitor and manage translation jobs</p>
-		</div>
+		<h1 class="text-2xl font-bold">Translation Jobs</h1>
 		<div class="flex gap-2">
-			<Button on:click={openModal} disabled={$agentStore.agents.length === 0 || $datasetStore.datasets.length === 0}>
-				Create Job
-			</Button>
+			<Button variant="secondary" on:click={testDownload}>Test Download</Button>
+			<Button variant="secondary" on:click={testDatasetPreview}>Test Dataset Preview</Button>
+			<Button variant="secondary" on:click={testJobStart}>Test Job Start</Button>
+			<Button variant="secondary" on:click={testJobCreation}>Test Job Creation</Button>
+			<Button on:click={openModal}>Create Job</Button>
 		</div>
 	</div>
 
@@ -563,6 +804,7 @@
 							<select
 								id="dataset"
 								bind:value={formData.dataset_id}
+								on:change={handleDatasetChange}
 								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
 								required
 							>

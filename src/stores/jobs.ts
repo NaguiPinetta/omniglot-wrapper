@@ -24,12 +24,23 @@ function createJobStore() {
     },
 
     async addJob(jobData: JobFormData) {
-      update(state => ({ ...state, loading: true }));
+      console.log('Job store: Starting job creation...');
+      update(state => ({ ...state, loading: true, error: null }));
       try {
-        await createJob(jobData);
+        console.log('Job store: Calling createJob API...');
+        const newJob = await createJob(jobData);
+        console.log('Job store: Job created successfully:', newJob.id);
+        console.log('Job store: Reloading jobs...');
         await this.loadJobs();
+        console.log('Job store: Jobs reloaded successfully');
       } catch (error) {
-        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to create job' }));
+        console.error('Job store: Error in addJob:', error);
+        update(state => ({ 
+          ...state, 
+          loading: false, 
+          error: error instanceof Error ? error.message : 'Failed to create job' 
+        }));
+        throw error; // Re-throw so UI can handle it
       }
     },
 
@@ -54,13 +65,24 @@ function createJobStore() {
     },
 
     async startJob(id: string) {
-        update(state => ({ ...state, loading: true }));
-        try {
-          await startJob(id);
-          await this.loadJobs();
-        } catch (error) {
-          update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to start job' }));
-        }
+      console.log('Job store: Starting job with ID:', id);
+      update(state => ({ ...state, loading: true, error: null }));
+      try {
+        console.log('Job store: Calling startJob API...');
+        await startJob(id);
+        console.log('Job store: Job started successfully');
+        console.log('Job store: Reloading jobs...');
+        await this.loadJobs();
+        console.log('Job store: Jobs reloaded after start');
+      } catch (error) {
+        console.error('Job store: Error in startJob:', error);
+        update(state => ({ 
+          ...state, 
+          loading: false, 
+          error: error instanceof Error ? error.message : 'Failed to start job' 
+        }));
+        throw error; // Re-throw so UI can handle it
+      }
     },
 
     async cancelJob(id: string) {

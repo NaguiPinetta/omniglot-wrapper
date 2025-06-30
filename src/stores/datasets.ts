@@ -24,12 +24,33 @@ function createDatasetStore() {
     },
 
     async addDataset(formData: DatasetFormData) {
-      update(state => ({ ...state, loading: true }));
+      console.log('=== DATASET STORE DEBUG START ===');
+      console.log('Dataset store: Starting dataset upload...');
+      console.log('FormData:', { 
+        name: formData.name, 
+        description: formData.description, 
+        hasFile: !!formData.file,
+        fileName: formData.file?.name 
+      });
+      
+      update(state => ({ ...state, loading: true, error: null }));
       try {
-        await uploadAndCreateDataset(formData);
+        console.log('Dataset store: Calling uploadAndCreateDataset API...');
+        const result = await uploadAndCreateDataset(formData);
+        console.log('Dataset store: Dataset uploaded successfully:', result.dataset.id);
+        console.log('Dataset store: Reloading datasets...');
         await this.loadDatasets();
+        console.log('Dataset store: Datasets reloaded successfully');
+        console.log('=== DATASET STORE DEBUG END (SUCCESS) ===');
       } catch (error) {
-        update(state => ({ ...state, loading: false, error: error instanceof Error ? error.message : 'Failed to add dataset' }));
+        console.error('=== DATASET STORE DEBUG END (ERROR) ===');
+        console.error('Dataset store: Error in addDataset:', error);
+        update(state => ({ 
+          ...state, 
+          loading: false, 
+          error: error instanceof Error ? error.message : 'Failed to add dataset' 
+        }));
+        throw error; // Re-throw so UI can handle it
       }
     },
 

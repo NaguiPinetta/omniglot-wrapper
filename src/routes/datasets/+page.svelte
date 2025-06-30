@@ -28,22 +28,41 @@
 	});
 
 	async function handleUpload() {
-		console.log('handleUpload called', { formData, loading: $datasetStore.loading });
+		console.log('=== DATASET UI DEBUG START ===');
+		console.log('handleUpload called');
+		console.log('FormData:', { 
+			name: formData.name, 
+			description: formData.description, 
+			hasFile: !!formData.file,
+			fileName: formData.file?.name 
+		});
+		
 		if (!formData.file) {
-			console.error('No file selected');
+			console.log('No file provided, returning early');
 			return;
 		}
 		
 		try {
-			console.log('Starting upload...', formData);
+			console.log('Calling datasetStore.addDataset...');
 			await datasetStore.addDataset(formData);
-			console.log('Upload completed, error:', $datasetStore.error);
+			console.log('Dataset store call completed');
+			console.log('Dataset store error:', $datasetStore.error);
+			
 			if (!$datasetStore.error) {
+				console.log('Upload successful, resetting form and closing modal');
 				resetForm();
 				showModal = false;
+				console.log('=== DATASET UI DEBUG END (SUCCESS) ===');
+			} else {
+				console.log('Upload failed with store error:', $datasetStore.error);
+				console.log('=== DATASET UI DEBUG END (STORE ERROR) ===');
 			}
 		} catch (error) {
-			console.error('Upload error:', error);
+			console.error('=== DATASET UI DEBUG END (EXCEPTION) ===');
+			console.error('Upload error caught in UI:', error);
+			console.error('Error type:', typeof error);
+			console.error('Error message:', error instanceof Error ? error.message : String(error));
+			console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
 		}
 	}
 
