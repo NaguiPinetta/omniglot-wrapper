@@ -11,6 +11,7 @@ export interface Job {
   agent_id: string;
   dataset_id: string;
   glossary_id: string | null;
+  glossary_usage_mode: 'enforce' | 'prefer' | 'ignore';
   source_language: string;
   translation_instructions?: string;
   column_mapping?: ColumnMapping;
@@ -38,6 +39,7 @@ export interface JobFormData {
   agent_id: string;
   dataset_id: string;
   glossary_id?: string | null;
+  glossary_usage_mode: 'enforce' | 'prefer' | 'ignore';
   source_language: string;
   translation_instructions?: string;
   column_mapping?: ColumnMapping;

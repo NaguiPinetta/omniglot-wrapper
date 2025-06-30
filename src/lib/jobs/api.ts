@@ -1,4 +1,4 @@
-import { supabaseClient } from '../supabaseClient';
+import { supabase as supabaseClient } from '../auth/client';
 import type { Job, JobFormData, JobResult } from '../../types/jobs';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { executeAgent } from '../agents/api';
@@ -9,13 +9,63 @@ import { getModel, getApiKey } from '../models/api';
 import type { Dataset } from '../../types/datasets';
 import type { ColumnMapping } from '../../types/jobs';
 
+// Helper function to get current user ID
+async function getCurrentUserId(client: SupabaseClient): Promise<string> {
+	console.log('Getting current user ID...');
+	
+	// Try to get user from session first
+	const { data: { session }, error: sessionError } = await client.auth.getSession();
+	console.log('Session check:', { session: !!session, user: session?.user?.email, error: sessionError });
+	
+	if (session?.user?.id) {
+		console.log('Found user ID from session:', session.user.id);
+		return session.user.id;
+	}
+	
+	// Fallback: try to get user directly
+	const { data: { user }, error: userError } = await client.auth.getUser();
+	console.log('User check:', { user: user?.email, error: userError });
+	
+	if (user?.id) {
+		console.log('Found user ID from getUser:', user.id);
+		return user.id;
+	}
+	
+	console.error('Authentication failed - no user found');
+	throw new Error('User not authenticated. Please log in again.');
+}
+
 // --- Database CRUD Functions ---
 
-export async function getJobs({
-	client = supabaseClient
-}: { client?: SupabaseClient } = {}): Promise<Job[]> {
-	const { data, error } = await client.from('jobs').select('*').order('created_at', { ascending: false });
-	if (error) throw error;
+export async function getJobs({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Job[]> {
+	console.log('=== JOBS API DEBUG START ===');
+	console.log('Client type:', client === supabaseClient ? 'supabaseClient' : 'server client');
+	
+	// Check current user/session
+	const { data: { user }, error: userError } = await client.auth.getUser();
+	console.log('Current user:', user?.email || 'No user');
+	console.log('User error:', userError);
+	
+	const { data: { session }, error: sessionError } = await client.auth.getSession();
+	console.log('Current session:', !!session);
+	console.log('Session error:', sessionError);
+	
+	// Try to get jobs
+	const { data, error } = await client
+		.from('jobs')
+		.select('*')
+		.order('created_at', { ascending: false });
+	
+	console.log('Jobs query result - data:', data);
+	console.log('Jobs query result - error:', error);
+	console.log('Jobs count:', data?.length || 0);
+	
+	if (error) {
+		console.log('=== JOBS API DEBUG END (ERROR) ===');
+		throw error;
+	}
+	
+	console.log('=== JOBS API DEBUG END ===');
 	return data ?? [];
 }
 
@@ -54,7 +104,7 @@ export async function createJob(
 			started_at: null,
 			completed_at: null,
 			error: null,
-			user_id: 'anonymous', // For now, using anonymous user
+			user_id: await getCurrentUserId(client),
 			target_language: jobData.target_language
 		};
 
@@ -196,6 +246,36 @@ async function processJobInBackground(
 			apiKey = apiKeyObj?.key_value;
 		}
 
+		// Get glossary entries if glossary_id is specified and usage mode is not 'ignore'
+		let glossaryEntries: any[] = [];
+		if (job.glossary_id && job.glossary_usage_mode !== 'ignore') {
+			console.log('Fetching glossary entries for module:', job.glossary_id);
+			console.log('Target language for filtering:', job.target_language);
+			
+			const { data: entries, error } = await client
+				.from('glossary')
+				.select('term, translation, language, context, note, type, description')
+				.eq('module_id', job.glossary_id);
+			
+			if (error) {
+				console.error('Error fetching glossary entries:', error);
+			} else {
+				const allEntries = entries || [];
+				// Filter glossary entries to match target language
+				glossaryEntries = allEntries.filter(entry => 
+					!entry.language || 
+					entry.language === job.target_language || 
+					entry.language === 'all' ||
+					entry.language === '*'
+				);
+				
+				console.log(`Loaded ${allEntries.length} total entries, filtered to ${glossaryEntries.length} entries matching target language '${job.target_language}'`);
+				if (glossaryEntries.length > 0) {
+					console.log('Filtered glossary entries:', glossaryEntries.map(e => `${e.term} → ${e.translation}`));
+				}
+			}
+		}
+
 		// Determine file type and parse content accordingly
 		let allRows: Record<string, string>[] = [];
 		let isXmlDataset = false;
@@ -292,15 +372,49 @@ async function processJobInBackground(
 				
 				let targetText = '';
 				try {
+					// Build system prompt with glossary if available
+					let systemPrompt = agent.prompt;
+					if (glossaryEntries.length > 0) {
+						const glossaryText = glossaryEntries
+							.map(entry => {
+								const contextPart = entry.context ? ` [Context: ${entry.context}]` : '';
+								return `* ${entry.term} ➔ ${entry.translation}${contextPart}`;
+							})
+							.join('\n');
+						
+						// Format glossary instruction based on usage mode
+						let glossaryInstruction = '';
+						if (job.glossary_usage_mode === 'enforce') {
+							glossaryInstruction = '\n\nUse these preferred terms in translations. You MUST use these exact translations when these terms appear:\n' + glossaryText;
+						} else if (job.glossary_usage_mode === 'prefer') {
+							glossaryInstruction = '\n\nUse these preferred terms in translations when applicable:\n' + glossaryText;
+						}
+						
+						systemPrompt += glossaryInstruction;
+						console.log('Enhanced system prompt with glossary:', systemPrompt);
+					}
+
 					const messages = [
-						{ role: 'system', content: agent.prompt },
+						{ role: 'system', content: systemPrompt },
 						{ role: 'user', content: `Translate from ${sourceLang} to ${targetLang}:
 ${sourceText}` }
 					];
+					
+					const requestBody: any = { 
+						model: model.name, 
+						messages, 
+						api_key: apiKey 
+					};
+				
+					// Include glossary in the request for API tracking/debugging
+					if (glossaryEntries.length > 0) {
+						requestBody.glossary = glossaryEntries;
+					}
+
 					const response = await fetch('/api/chat', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ model: model.name, messages, api_key: apiKey })
+						body: JSON.stringify(requestBody)
 					});
 					const data = await response.json();
 					targetText = data.choices?.[0]?.message?.content || data.content || '';

@@ -3,6 +3,7 @@
 	import { jobStore } from '../../stores/jobs';
 	import { agentStore } from '../../stores/agents';
 	import { datasetStore } from '../../stores/datasets';
+	import { glossaryStore } from '../../stores/glossary';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -19,7 +20,8 @@
 		description: '',
 		agent_id: '',
 		dataset_id: '',
-		glossary_id: null,
+		glossary_id: '',
+		glossary_usage_mode: 'prefer',
 		source_language: 'en',
 		translation_instructions: '',
 		target_language: ''
@@ -44,6 +46,8 @@
 		if (data.jobs) jobStore.set({ jobs: data.jobs, loading: false, error: data.error || null });
 		if (data.agents) agentStore.set({ agents: data.agents, loading: false, error: null });
 		if (data.datasets) datasetStore.set({ datasets: data.datasets, loading: false, error: null });
+		// Load glossaries for job creation
+		glossaryStore.loadEntries();
 		// Immediately fetch jobs on mount
 		jobStore.loadJobs();
 		// Set up polling every 5 seconds
@@ -104,6 +108,7 @@
 		// Create enhanced job data with column mapping
 		const enhancedJobData = {
 			...formData,
+			glossary_id: formData.glossary_id || null, // Ensure empty string becomes null
 			translation_instructions: finalInstructions,
 			column_mapping: columnMapping
 		};
@@ -143,7 +148,8 @@
 			description: '',
 			agent_id: '',
 			dataset_id: '',
-			glossary_id: null,
+			glossary_id: '',
+			glossary_usage_mode: 'prefer',
 			source_language: 'en',
 			translation_instructions: '',
 			target_language: ''
@@ -453,6 +459,35 @@
 		const remSec = sec % 60;
 		return min > 0 ? `${min}m ${remSec}s` : `${remSec}s`;
 	}
+
+	// Helper function to get unique modules from glossary entries
+	function getUniqueModules(entries: any[]) {
+		const moduleMap = new Map();
+		
+		entries.forEach(entry => {
+			if (entry.module_id && entry.module_name) {
+				if (!moduleMap.has(entry.module_id)) {
+					moduleMap.set(entry.module_id, {
+						id: entry.module_id,
+						name: entry.module_name,
+						entryCount: 0,
+						languages: new Set()
+					});
+				}
+				const module = moduleMap.get(entry.module_id);
+				module.entryCount++;
+				if (entry.language) {
+					module.languages.add(entry.language);
+				}
+			}
+		});
+		
+		// Convert languages Set to Array and return modules
+		return Array.from(moduleMap.values()).map(module => ({
+			...module,
+			languages: Array.from(module.languages)
+		}));
+	}
 </script>
 
 <svelte:head>
@@ -540,6 +575,84 @@
 								<p class="text-xs text-gray-500 mt-1">No datasets available. Upload a dataset first.</p>
 							{/if}
 						</div>
+					</div>
+
+					<!-- Glossary Selection -->
+					<div class="space-y-4 border-t pt-4">
+						<h3 class="text-lg font-medium">📚 Glossary Settings</h3>
+						
+						<div>
+							<label for="glossary" class="block text-sm font-medium mb-1">Select Glossary Module</label>
+							<select
+								id="glossary"
+								bind:value={formData.glossary_id}
+								class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+							>
+								<option value="">None - No glossary</option>
+								{#each getUniqueModules($glossaryStore.entries) as module}
+									<option value={module.id}>
+										{module.name} ({module.entryCount} terms) - {module.languages.join(', ')}
+									</option>
+								{/each}
+							</select>
+							{#if $glossaryStore.entries.length === 0}
+								<p class="text-xs text-gray-500 mt-1">No glossary entries available. Create glossary entries first.</p>
+							{:else}
+								<p class="text-xs text-gray-500 mt-1">
+									Select a glossary module for consistent terminology. Only terms matching the target language will be used.
+								</p>
+							{/if}
+							{#if $glossaryStore.loading}
+								<p class="text-xs text-blue-500 mt-1">Loading glossaries...</p>
+							{/if}
+							{#if $glossaryStore.error}
+								<p class="text-xs text-red-500 mt-1">Error loading glossaries: {$glossaryStore.error}</p>
+							{/if}
+						</div>
+
+						{#if formData.glossary_id}
+						<div>
+								<label class="block text-sm font-medium mb-2">Glossary Usage Mode</label>
+								<div class="space-y-2">
+									<label class="flex items-center space-x-2 cursor-pointer">
+										<input
+											type="radio"
+											bind:group={formData.glossary_usage_mode}
+											value="enforce"
+											class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+										/>
+										<div>
+											<span class="text-sm font-medium">🔒 Enforce Strictly</span>
+											<p class="text-xs text-gray-500">Must use glossary terms exactly as defined. Fail if terms are not followed.</p>
+						</div>
+									</label>
+									<label class="flex items-center space-x-2 cursor-pointer">
+										<input
+											type="radio"
+											bind:group={formData.glossary_usage_mode}
+											value="prefer"
+											class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+										/>
+					<div>
+											<span class="text-sm font-medium">⭐ Prefer When Available</span>
+											<p class="text-xs text-gray-500">Use glossary terms when applicable, but allow natural translation otherwise.</p>
+										</div>
+									</label>
+									<label class="flex items-center space-x-2 cursor-pointer">
+										<input
+											type="radio"
+											bind:group={formData.glossary_usage_mode}
+											value="ignore"
+											class="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+										/>
+										<div>
+											<span class="text-sm font-medium">🚫 Ignore Glossary</span>
+											<p class="text-xs text-gray-500">Translate naturally without considering glossary terms.</p>
+										</div>
+									</label>
+								</div>
+							</div>
+						{/if}
 					</div>
 
 					<!-- Column Mapping Section -->

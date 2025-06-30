@@ -2,9 +2,9 @@ import type { PageServerLoad } from './$types';
 import { getDatasets } from '$lib/datasets/api';
 import { createServerSupabaseClient } from '$lib/server/supabase';
 
-export const load: PageServerLoad = async ({ fetch }) => {
+export const load: PageServerLoad = async (event) => {
 	try {
-		const serverSupabase = createServerSupabaseClient(fetch);
+		const serverSupabase = await createServerSupabaseClient(event);
 		const datasets = await getDatasets({ client: serverSupabase });
 		return {
 			datasets: datasets || []

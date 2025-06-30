@@ -1,16 +1,17 @@
 import { json } from '@sveltejs/kit';
 import { z } from 'zod';
 import { createServerSupabaseClient } from '$lib/server/supabase';
+import type { RequestHandler } from './$types';
 
 const ModuleSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional()
 });
 
-export async function PUT({ request, params, fetch }) {
-  const supabase = createServerSupabaseClient(fetch);
-  const { id } = params;
-  const body = await request.json();
+export const PUT: RequestHandler = async (event) => {
+  const supabase = await createServerSupabaseClient(event);
+  const { id } = event.params;
+  const body = await event.request.json();
   const parse = ModuleSchema.safeParse(body);
   if (!parse.success) {
     return json({ error: 'Invalid input', details: parse.error.flatten() }, { status: 400 });
@@ -25,12 +26,12 @@ export async function PUT({ request, params, fetch }) {
   if (error) {
     return json({ error: error.message }, { status: 500 });
   }
-  return json({ module: data });
+  return json(data);
 }
 
-export async function DELETE({ params, fetch }) {
-  const supabase = createServerSupabaseClient(fetch);
-  const { id } = params;
+export const DELETE: RequestHandler = async (event) => {
+  const supabase = await createServerSupabaseClient(event);
+  const { id } = event.params;
   const { error } = await supabase.from('modules').delete().eq('id', id);
   if (error) {
     return json({ error: error.message }, { status: 500 });

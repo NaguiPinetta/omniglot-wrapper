@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { supabaseClient } from '$lib/supabaseClient';
+import { createServerSupabaseClient } from '$lib/server/supabase';
 import { z } from 'zod';
 
 // Zod schema for glossary entry validation
@@ -17,12 +17,13 @@ const GlossaryEntrySchema = z.object({
 });
 
 // GET - Fetch all glossary entries
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async (event) => {
   console.log('=== GLOSSARY GET DEBUG START ===');
   
   try {
+    const supabase = await createServerSupabaseClient(event);
     // Join with modules to get module name
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabase
       .from('glossary')
       .select('*, modules(name)')
       .order('created_at', { ascending: false });
@@ -50,11 +51,12 @@ export const GET: RequestHandler = async () => {
 };
 
 // POST - Create new glossary entry
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async (event) => {
   console.log('=== GLOSSARY SAVE DEBUG START ===');
   
   try {
-    const rawData = await request.json();
+    const supabase = await createServerSupabaseClient(event);
+    const rawData = await event.request.json();
     console.log('Received data:', JSON.stringify(rawData, null, 2));
     
     // Clean the data - convert empty strings to undefined for optional fields
@@ -98,7 +100,7 @@ export const POST: RequestHandler = async ({ request }) => {
     console.log('Validated entry:', JSON.stringify(validatedEntry, null, 2));
     
     console.log('Adding new entry...');
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabase
       .from('glossary')
       .insert([validatedEntry])
       .select('*, modules(name)')
@@ -124,11 +126,12 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 
 // PUT - Update existing glossary entry
-export const PUT: RequestHandler = async ({ request }) => {
+export const PUT: RequestHandler = async (event) => {
   console.log('=== GLOSSARY UPDATE DEBUG START ===');
   
   try {
-    const rawData = await request.json();
+    const supabase = await createServerSupabaseClient(event);
+    const rawData = await event.request.json();
     console.log('Received update data:', JSON.stringify(rawData, null, 2));
     
     const { id, ...updateData } = rawData;
@@ -167,7 +170,7 @@ export const PUT: RequestHandler = async ({ request }) => {
       return json({ error: 'Validation failed', details: validationResult.error.issues }, { status: 400 });
     }
     
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabase
       .from('glossary')
       .update(validationResult.data)
       .eq('id', id)
@@ -192,17 +195,19 @@ export const PUT: RequestHandler = async ({ request }) => {
 };
 
 // DELETE - Delete glossary entry
-export const DELETE: RequestHandler = async ({ request }) => {
+export const DELETE: RequestHandler = async (event) => {
   console.log('=== GLOSSARY DELETE DEBUG START ===');
   
   try {
-    const { id } = await request.json();
+    const supabase = await createServerSupabaseClient(event);
+    const url = new URL(event.request.url);
+    const id = url.searchParams.get('id');
     
     if (!id) {
-      return json({ error: 'ID is required for deletion' }, { status: 400 });
+      return json({ error: 'ID is required' }, { status: 400 });
     }
     
-    const { error } = await supabaseClient
+    const { error } = await supabase
       .from('glossary')
       .delete()
       .eq('id', id);
@@ -212,7 +217,7 @@ export const DELETE: RequestHandler = async ({ request }) => {
       return json({ error: 'Database error', details: error }, { status: 500 });
     }
     
-    console.log('Successfully deleted entry:', id);
+    console.log('Delete successful for ID:', id);
     console.log('=== GLOSSARY DELETE DEBUG END ===');
     
     return json({ success: true });
@@ -223,38 +228,39 @@ export const DELETE: RequestHandler = async ({ request }) => {
   }
 };
 
-// PATCH - Update last used timestamp
-export const PATCH: RequestHandler = async ({ request }) => {
-  console.log('=== GLOSSARY PATCH DEBUG START ===');
+// PATCH - Bulk operations
+export const PATCH: RequestHandler = async (event) => {
+  console.log('=== GLOSSARY BULK DEBUG START ===');
   
   try {
-    const { id, action } = await request.json();
+    const supabase = await createServerSupabaseClient(event);
+    const { action, ids } = await event.request.json();
     
-    if (!id) {
-      return json({ error: 'ID is required for patch' }, { status: 400 });
+    if (!action || !ids || !Array.isArray(ids)) {
+      return json({ error: 'Action and IDs array are required' }, { status: 400 });
     }
     
-    if (action === 'updateLastUsed') {
-      const { error } = await supabaseClient
+    if (action === 'delete') {
+      const { error } = await supabase
         .from('glossary')
-        .update({ last_used: new Date().toISOString() })
-        .eq('id', id);
+        .delete()
+        .in('id', ids);
       
       if (error) {
-        console.log('Database error:', error);
+        console.log('Bulk delete error:', error);
         return json({ error: 'Database error', details: error }, { status: 500 });
       }
       
-      console.log('Successfully updated last used for:', id);
-      console.log('=== GLOSSARY PATCH DEBUG END ===');
+      console.log('Bulk delete successful for IDs:', ids);
+      console.log('=== GLOSSARY BULK DEBUG END ===');
       
-      return json({ success: true });
+      return json({ success: true, deletedCount: ids.length });
     }
     
-    return json({ error: 'Unknown action' }, { status: 400 });
+    return json({ error: 'Unsupported action' }, { status: 400 });
   } catch (error) {
     console.log('PATCH error:', error);
-    console.log('=== GLOSSARY PATCH DEBUG END ===');
+    console.log('=== GLOSSARY BULK DEBUG END ===');
     return json({ error: 'Internal server error' }, { status: 500 });
   }
 }; 

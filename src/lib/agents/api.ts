@@ -1,10 +1,32 @@
-import { supabaseClient } from '../supabaseClient';
+import { supabase as supabaseClient } from '../auth/client';
 import type { Agent, AgentFormData, AgentResponse } from '../../types/agents';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export async function getAgents({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Agent[]> {
+	console.log('=== AGENTS API DEBUG START ===');
+	console.log('Client type:', client === supabaseClient ? 'supabaseClient' : 'server client');
+	
+	// Check current user/session
+	const { data: { user }, error: userError } = await client.auth.getUser();
+	console.log('Current user:', user?.email || 'No user');
+	console.log('User error:', userError);
+	
+	const { data: { session }, error: sessionError } = await client.auth.getSession();
+	console.log('Current session:', !!session);
+	console.log('Session error:', sessionError);
+	
+	// Try to get agents
 	const { data, error } = await client.from('agents').select('*');
-  if (error) throw error;
+	console.log('Agents query result - data:', data);
+	console.log('Agents query result - error:', error);
+	console.log('Agents count:', data?.length || 0);
+	
+	if (error) {
+		console.log('=== AGENTS API DEBUG END (ERROR) ===');
+		throw error;
+	}
+	
+	console.log('=== AGENTS API DEBUG END ===');
 	return data ?? [];
 }
 

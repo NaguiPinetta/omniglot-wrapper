@@ -1,15 +1,15 @@
 import type { GlossaryEntry } from '../../types/glossary';
 
-export async function getGlossaryEntries(): Promise<GlossaryEntry[]> {
-	const response = await fetch('/glossary');
+export async function getGlossaryEntries(fetchFn: typeof fetch = fetch): Promise<GlossaryEntry[]> {
+	const response = await fetchFn('/glossary');
 	if (!response.ok) {
 		throw new Error(`Failed to fetch glossary entries: ${response.status} ${response.statusText}`);
 	}
 	return response.json();
 }
 
-export async function getModules(): Promise<{ id: string; name: string; description?: string }[]> {
-	const response = await fetch('/api/modules');
+export async function getModules(fetchFn: typeof fetch = fetch): Promise<{ id: string; name: string; description?: string }[]> {
+	const response = await fetchFn('/api/modules');
 	if (!response.ok) {
 		throw new Error(`Failed to fetch modules: ${response.status} ${response.statusText}`);
 	}
@@ -17,9 +17,10 @@ export async function getModules(): Promise<{ id: string; name: string; descript
 }
 
 export async function createGlossaryEntry(
-	entry: Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>
+	entry: Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>,
+	fetchFn: typeof fetch = fetch
 ): Promise<GlossaryEntry> {
-	const response = await fetch('/glossary', {
+	const response = await fetchFn('/glossary', {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -37,9 +38,10 @@ export async function createGlossaryEntry(
 
 export async function updateGlossaryEntry(
 	id: string,
-	entry: Partial<Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>>
+	entry: Partial<Omit<GlossaryEntry, 'id' | 'created_at' | 'module_name'>>,
+	fetchFn: typeof fetch = fetch
 ): Promise<GlossaryEntry> {
-	const response = await fetch('/glossary', {
+	const response = await fetchFn('/glossary', {
 		method: 'PUT',
 		headers: {
 			'Content-Type': 'application/json',
@@ -55,8 +57,8 @@ export async function updateGlossaryEntry(
 	return response.json();
 }
 
-export async function deleteGlossaryEntry(id: string): Promise<void> {
-	const response = await fetch('/glossary', {
+export async function deleteGlossaryEntry(id: string, fetchFn: typeof fetch = fetch): Promise<void> {
+	const response = await fetchFn('/glossary', {
 		method: 'DELETE',
 		headers: {
 			'Content-Type': 'application/json',
@@ -70,8 +72,8 @@ export async function deleteGlossaryEntry(id: string): Promise<void> {
 	}
 }
 
-export async function updateLastUsed(id: string): Promise<void> {
-	const response = await fetch('/glossary', {
+export async function updateLastUsed(id: string, fetchFn: typeof fetch = fetch): Promise<void> {
+	const response = await fetchFn('/glossary', {
 		method: 'PATCH',
 		headers: {
 			'Content-Type': 'application/json',

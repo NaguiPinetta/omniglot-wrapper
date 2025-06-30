@@ -4,8 +4,8 @@ import { getJobs } from '$lib/jobs/api';
 import { getAgents } from '$lib/agents/api';
 import { getDatasets } from '$lib/datasets/api';
 
-export const load: PageServerLoad = async ({ fetch }) => {
-	const supabase = createServerSupabaseClient(fetch);
+export const load: PageServerLoad = async (event) => {
+	const supabase = await createServerSupabaseClient(event);
 	
 	try {
 		const [jobs, agents, datasets] = await Promise.all([

@@ -1,23 +1,25 @@
 import { json } from '@sveltejs/kit';
 import { z } from 'zod';
-import { supabaseClient } from '$lib/supabaseClient';
+import { createServerSupabaseClient } from '$lib/server/supabase';
+import type { RequestHandler } from './$types';
 
 const ModuleSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional()
 });
 
-export async function GET() {
+export const GET: RequestHandler = async (event) => {
   console.log('=== MODULES GET DEBUG START ===');
   try {
-    const { data, error } = await supabaseClient.from('modules').select('*').order('name');
+    const supabase = await createServerSupabaseClient(event);
+    const { data, error } = await supabase.from('modules').select('*').order('name');
     if (error) {
       console.log('Modules GET error:', error);
       return json({ error: error.message }, { status: 500 });
     }
     console.log('Modules GET success:', data?.length || 0, 'modules');
     console.log('=== MODULES GET DEBUG END ===');
-    return json({ modules: data });
+    return json(data);
   } catch (error) {
     console.log('Modules GET exception:', error);
     console.log('=== MODULES GET DEBUG END ===');
@@ -25,11 +27,12 @@ export async function GET() {
   }
 }
 
-export async function POST({ request }) {
+export const POST: RequestHandler = async (event) => {
   console.log('=== MODULES POST DEBUG START ===');
   
   try {
-    const body = await request.json();
+    const supabase = await createServerSupabaseClient(event);
+    const body = await event.request.json();
     console.log('Received module data:', body);
     
     const parse = ModuleSchema.safeParse(body);
@@ -41,7 +44,7 @@ export async function POST({ request }) {
     const { name, description } = parse.data;
     console.log('Attempting to insert module:', { name, description });
     
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabase
       .from('modules')
       .insert({ name, description })
       .select()
@@ -56,7 +59,7 @@ export async function POST({ request }) {
     
     console.log('Module created successfully:', data);
     console.log('=== MODULES POST DEBUG END ===');
-    return json({ module: data });
+    return json(data);
   } catch (error) {
     console.log('POST exception:', error);
     console.log('=== MODULES POST DEBUG END ===');

@@ -4,6 +4,9 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.PUBLIC_SUPABASE_ANON_KEY;
 
+// For testing, we'll need to handle authentication differently
+// This test file will need to be updated to work with auth
+
 if (!supabaseUrl || !supabaseKey) {
   console.error('Missing Supabase environment variables');
   process.exit(1);
@@ -51,7 +54,7 @@ async function testJobCreation() {
     total_items: datasets[0].row_count || 0,
     processed_items: 0,
     failed_items: 0,
-    user_id: 'anonymous'
+    // user_id will be handled by the API with authentication
   };
   
   console.log('Attempting to insert minimal job:', minimalJob);

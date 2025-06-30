@@ -2,9 +2,9 @@ import type { PageServerLoad } from './$types';
 import { getModels, getApiKeys } from '$lib/models/api';
 import { createServerSupabaseClient } from '$lib/server/supabase';
 
-export const load: PageServerLoad = async ({ fetch }) => {
+export const load: PageServerLoad = async (event) => {
 	try {
-		const serverSupabase = createServerSupabaseClient(fetch);
+		const serverSupabase = await createServerSupabaseClient(event);
 		const [models, apiKeys] = await Promise.all([
 			getModels({ client: serverSupabase }),
 			getApiKeys({ client: serverSupabase })

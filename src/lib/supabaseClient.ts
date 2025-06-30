@@ -3,7 +3,14 @@ import { env } from '$env/dynamic/public';
 
 export const supabaseClient = createClient(
 	env.PUBLIC_SUPABASE_URL!,
-	env.PUBLIC_SUPABASE_ANON_KEY!
+	env.PUBLIC_SUPABASE_ANON_KEY!,
+	{
+		auth: {
+			autoRefreshToken: true,
+			persistSession: true,
+			detectSessionInUrl: true
+		}
+	}
 );
 
 // Types based on your schema

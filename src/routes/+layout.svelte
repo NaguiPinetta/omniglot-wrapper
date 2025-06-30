@@ -1,6 +1,24 @@
 <script lang="ts">
 	import '../app.css';
 	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { initAuth, user, loading, signOut } from '$lib/auth/client';
+	import Button from '$lib/components/ui/Button.svelte';
+
+	onMount(() => {
+		initAuth();
+	});
+
+	async function handleSignOut() {
+		console.log('Sign out button clicked');
+		try {
+			console.log('Attempting to sign out...');
+			await signOut();
+			console.log('Sign out successful');
+		} catch (error) {
+			console.error('Error signing out:', error);
+		}
+	}
 </script>
 
 <div class="min-h-screen bg-gray-50">
@@ -46,6 +64,24 @@
 							Models
 						</a>
 					</div>
+				</div>
+				<div class="flex items-center space-x-4">
+					{#if $loading}
+						<div class="text-sm text-gray-500">Loading...</div>
+					{:else if $user}
+						<div class="flex items-center space-x-4">
+							<span class="text-sm text-gray-700">
+								Welcome, {$user.email}
+							</span>
+							<Button variant="secondary" size="sm" on:click={handleSignOut}>
+								Sign Out
+							</Button>
+						</div>
+					{:else}
+						<a href="/login" class="text-sm text-indigo-600 hover:text-indigo-500">
+							Sign In
+						</a>
+					{/if}
 				</div>
 			</div>
 		</div>

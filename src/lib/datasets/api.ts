@@ -5,6 +5,15 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { XMLParser } from 'fast-xml-parser';
 
+// Helper function to get current user ID
+async function getCurrentUserId(client: SupabaseClient): Promise<string> {
+  const { data: { session } } = await client.auth.getSession();
+  if (!session?.user?.id) {
+    throw new Error('User not authenticated');
+  }
+  return session.user.id;
+}
+
 // --- Database CRUD Functions ---
 
 export async function getDatasets({
@@ -26,19 +35,19 @@ export async function getDatasets({
 		}
 		
 		return {
-			id: row.id,
-			name: row.name,
-			description: '', // Not in database, use empty string
-			file_name: row.file_url || '', // Use file_url as file_name
-			file_size: 0, // Not in database, use 0
+		id: row.id,
+		name: row.name,
+		description: '', // Not in database, use empty string
+		file_name: row.file_url || '', // Use file_url as file_name
+		file_size: 0, // Not in database, use 0
 			file_type: fileType,
-			row_count: row.row_count || 0,
+		row_count: row.row_count || 0,
 			columns: row.columns || [], // Use stored columns if available
-			status: 'ready' as const, // Default to ready since not in database
-			user_id: 'anonymous', // Default user
-			created_at: row.uploaded_at || new Date().toISOString(),
-			updated_at: row.uploaded_at || new Date().toISOString(),
-			file_url: row.file_url
+		status: 'ready' as const, // Default to ready since not in database
+		user_id: row.user_id || '', // Use user_id from database
+		created_at: row.uploaded_at || new Date().toISOString(),
+		updated_at: row.uploaded_at || new Date().toISOString(),
+		file_url: row.file_url
 		};
 	});
 }
@@ -70,7 +79,7 @@ export async function getDataset(
 		row_count: data.row_count || 0,
 		columns: data.columns || [], // Use stored columns if available
 		status: 'ready' as const, // Default to ready since not in database
-		user_id: 'anonymous', // Default user
+	user_id: data.user_id || '', // Use user_id from database
 		created_at: data.uploaded_at || new Date().toISOString(),
 		updated_at: data.uploaded_at || new Date().toISOString(),
 		file_url: data.file_url,
@@ -262,7 +271,7 @@ export async function uploadAndCreateDataset(
     row_count: preview.totalRows,
     columns: preview.headers,
     status: 'ready',
-    user_id: 'anonymous',
+    user_id: await getCurrentUserId(client),
     created_at: data.uploaded_at || new Date().toISOString(),
     updated_at: data.uploaded_at || new Date().toISOString(),
     file_url: data.file_url,
@@ -292,7 +301,7 @@ export async function getDatasetPreview(
   if (!data.file_content) {
     throw new Error('Dataset content not found. Please re-upload the dataset.');
   }
-
+  
   // Determine file type from columns or file_url
   let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
   if (data.file_url && typeof data.file_url === 'string') {

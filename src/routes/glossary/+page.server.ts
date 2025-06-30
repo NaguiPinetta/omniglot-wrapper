@@ -1,13 +1,12 @@
 import { getGlossaryEntries, getModules } from '$lib/glossary/api';
 import type { PageServerLoad } from './$types';
-import { createServerSupabaseClient } from '$lib/server/supabase';
 
 export const load: PageServerLoad = async ({ fetch }) => {
 	try {
-		const serverSupabase = createServerSupabaseClient(fetch);
+		// Pass the server fetch function to the API calls
 		const [entries, modules] = await Promise.all([
-			getGlossaryEntries({ client: serverSupabase }),
-			getModules({ client: serverSupabase })
+			getGlossaryEntries(fetch),
+			getModules(fetch)
 		]);
 		return {
 			entries,
