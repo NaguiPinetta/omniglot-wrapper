@@ -32,6 +32,11 @@
 	let usageStats: UsageStats[] = [];
 	let loadingUsage = false;
 
+	// Sync models state
+	let syncingModels = false;
+	let syncMessage = '';
+	let syncError = '';
+
 	// Load usage statistics
 	async function loadUsageStats() {
 		loadingUsage = true;
@@ -41,6 +46,49 @@
 			logger.error('Failed to load usage stats', error);
 		} finally {
 			loadingUsage = false;
+		}
+	}
+
+	// Sync OpenAI models
+	async function handleSyncModels() {
+		const syncLogger = logger.scope('ModelSync');
+		syncLogger.info('Starting models sync');
+		
+		syncingModels = true;
+		syncMessage = '';
+		syncError = '';
+
+		try {
+			const response = await fetch('/api/models/sync', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				}
+			});
+
+			const result = await response.json();
+
+			if (!response.ok) {
+				throw new Error(result.error || `HTTP ${response.status}`);
+			}
+
+			syncLogger.info('Models sync completed', result.results);
+			syncMessage = result.message;
+			
+			// Reload models to show the new ones
+			await modelStore.loadModels();
+			
+		} catch (error: any) {
+			syncLogger.error('Models sync failed', error);
+			syncError = error.message || 'Failed to sync models. Please try again.';
+		} finally {
+			syncingModels = false;
+			
+			// Clear messages after 5 seconds
+			setTimeout(() => {
+				syncMessage = '';
+				syncError = '';
+			}, 5000);
 		}
 	}
 
@@ -343,13 +391,54 @@
 		<!-- Available Models -->
 		<Card>
 			<CardHeader>
-				<CardTitle>Available Models</CardTitle>
-				<CardDescription>
-					Browse AI models available for translation tasks
-				</CardDescription>
+				<div class="flex justify-between items-center">
+					<div>
+						<CardTitle>Available Models</CardTitle>
+						<CardDescription>
+							Browse AI models available for translation tasks
+						</CardDescription>
+					</div>
+					<button 
+						class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-md border border-transparent shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50"
+						on:click={handleSyncModels}
+						disabled={syncingModels}
+					>
+						{#if syncingModels}
+							<div class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-white border-r-transparent mr-2"></div>
+							Syncing...
+						{:else}
+							<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+							</svg>
+							Sync OpenAI Models
+						{/if}
+					</button>
+				</div>
 			</CardHeader>
 			<CardContent>
 				<div class="space-y-4">
+					{#if syncMessage}
+						<div class="bg-green-50 border border-green-200 rounded-md p-4 text-green-700">
+							<div class="flex items-center">
+								<svg class="w-5 h-5 text-green-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+								</svg>
+								<p class="text-sm">{syncMessage}</p>
+							</div>
+						</div>
+					{/if}
+
+					{#if syncError}
+						<div class="bg-red-50 border border-red-200 rounded-md p-4 text-red-700">
+							<div class="flex items-center">
+								<svg class="w-5 h-5 text-red-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+								</svg>
+								<p class="text-sm">{syncError}</p>
+							</div>
+						</div>
+					{/if}
+
 					<!-- Provider Filter -->
 					<div>
 						<label for="provider-filter" class="block text-sm font-medium text-gray-700 mb-1">Filter by Provider</label>

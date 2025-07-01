@@ -2,6 +2,7 @@ export interface ApiKey {
 	id: string;
 	provider: string;
 	key_value: string;
+	is_active: boolean;
 	created_at: string;
 	updated_at: string;
 }

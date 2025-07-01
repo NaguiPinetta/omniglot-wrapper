@@ -44,6 +44,15 @@
     m => m.provider === selectedProvider && m.api_key_id && availableApiKeyIds.includes(m.api_key_id)
   );
 
+  // Debug logging for model filtering
+  $: if (selectedProvider) {
+    console.log('Debug - Selected provider:', selectedProvider);
+    console.log('Debug - Available API key IDs:', availableApiKeyIds);
+    console.log('Debug - All models:', $modelStore.models);
+    console.log('Debug - Models for provider:', $modelStore.models.filter(m => m.provider === selectedProvider));
+    console.log('Debug - Filtered models:', filteredModels);
+  }
+
   let availableModels: Model[] = [];
   let loadingModels = false;
 
@@ -149,8 +158,8 @@
       await agentStore.addAgent(formData);
       showCreateModal = false;
       resetForm();
-    } catch (error) {
-      console.error('Failed to create agent:', error);
+    } catch (error: any) {
+      logger.error('Failed to create agent', error);
     }
   }
 
@@ -161,26 +170,28 @@
       editingAgent = null;
       dialogOpen = false;
       resetForm();
-    } catch (error) {
-      console.error('Failed to update agent:', error);
+    } catch (error: any) {
+      logger.error('Failed to update agent', error);
     }
   }
 
   // Helper functions for model filtering and display
   function getAvailableModels(store: any) {
-    console.log('getAvailableModels called with store:', store);
+    const modelLogger = logger.scope('ModelFiltering');
+    modelLogger.debug('Getting available models', { hasModels: !!store.models, modelCount: store.models?.length });
+    
     if (!store.models || store.models.length === 0) {
-      console.log('No models in store');
+      modelLogger.debug('No models in store');
       return [];
     }
     
-    console.log('Store models count:', store.models.length);
     // Temporarily show all models to fix the dropdown issue
     const allModels = store.models.filter((model: any) => {
       const isActive = model.is_active !== undefined ? model.is_active : true;
       return isActive;
     });
-    console.log('Available models count:', allModels.length);
+    
+    modelLogger.debug('Available models filtered', { availableCount: allModels.length });
     return allModels;
   }
 
