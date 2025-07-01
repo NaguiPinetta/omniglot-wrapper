@@ -10,6 +10,7 @@
   import type { PageData } from './$types';
   import { modelStore } from '../../stores/models';
   import type { Model } from '../../types/models';
+  import { logger } from '$lib/utils/logger';
 
   export let data: PageData;
 
@@ -48,9 +49,16 @@
 
   onMount(() => {
     // Initialize store with server-loaded data
-    console.log('onMount - received data:', data);
+    const agentLogger = logger.scope('AgentMount');
+    agentLogger.debug('Initializing agents page', { 
+      hasAgents: !!data.agents, 
+      agentCount: data.agents?.length,
+      hasApiKeys: !!data.apiKeys,
+      hasModels: !!data.models,
+      hasError: !!data.error
+    });
+    
     if (data.agents) {
-      console.log('Setting agents:', data.agents);
       agentStore.setAgents(data.agents);
     }
     if (data.apiKeys) {

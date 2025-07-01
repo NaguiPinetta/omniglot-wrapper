@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import type { Model, ApiKey, ModelStore, ApiKeyFormData } from '../types/models';
 import { getModels, getApiKeys, createApiKey, deleteApiKey, getModelsByProvider } from '../lib/models/api';
+import { logger } from '../lib/utils/logger';
 
 const initialState: ModelStore = {
 	models: [],
@@ -49,21 +50,20 @@ function createModelStore() {
 		},
 
 		async addApiKey(apiKeyData: ApiKeyFormData) {
-			console.log('Store addApiKey called with:', apiKeyData);
+			const storeLogger = logger.scope('ModelStore');
+			storeLogger.debug('Adding API key', { provider: apiKeyData.provider });
 			update(state => ({ ...state, loading: true, error: null }));
 			try {
-				console.log('Calling createApiKey API...');
 				const newApiKey = await createApiKey(apiKeyData);
-				console.log('API call successful, new API key:', newApiKey);
+				storeLogger.debug('API key created successfully', { keyId: newApiKey.id });
 				update(state => ({
 					...state,
 					apiKeys: [newApiKey, ...state.apiKeys],
 					loading: false
 				}));
 			} catch (error) {
-				console.error('Error in addApiKey:', error);
+				storeLogger.error('Error creating API key', error);
 				const errorMessage = error instanceof Error ? error.message : 'Failed to create API key';
-				console.log('Setting error message:', errorMessage);
 				update(state => ({ ...state, loading: false, error: errorMessage }));
 			}
 		},

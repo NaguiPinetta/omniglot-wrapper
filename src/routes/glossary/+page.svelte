@@ -13,6 +13,7 @@
 	} from '$lib/components/ui/dialog';
 	import type { GlossaryFormData, GlossaryEntry } from '../../types/glossary';
 	import { getLanguageOptions } from '$lib/utils';
+	import { logger } from '$lib/utils/logger';
 
 	// New: modules and filter state
 	export let data: { entries: GlossaryEntry[]; modules: any[]; error: string | null };
@@ -52,11 +53,13 @@
 	}
 
 	async function handleSave() {
-		console.log('=== GLOSSARY SAVE DEBUG START ===');
-		console.log('Editing entry:', editingEntry);
-		console.log('Exceptions input:', exceptionsInput);
-		console.log('Is editing:', isEditing);
-		console.log('Current edit ID:', currentEditId);
+		const glossaryLogger = logger.scope('GlossarySave');
+		glossaryLogger.debug('Starting glossary entry save', { 
+			isEditing, 
+			currentEditId, 
+			term: editingEntry.term,
+			hasExceptions: !!editingEntry.exceptions && Object.keys(editingEntry.exceptions).length > 0
+		});
 		
 		// Clean up the entry data before saving
 		const cleanedEntry = {
@@ -74,32 +77,33 @@
 				: undefined
 		};
 		
-		console.log('Cleaned entry:', cleanedEntry);
+		glossaryLogger.debug('Entry data cleaned', { 
+			hasNote: !!cleanedEntry.note,
+			hasContext: !!cleanedEntry.context,
+			moduleId: cleanedEntry.module_id,
+			hasExceptions: !!cleanedEntry.exceptions
+		});
 		
 		try {
 			if (isEditing && currentEditId) {
-				console.log('Updating entry...');
+				glossaryLogger.debug('Updating existing entry', { entryId: currentEditId });
 				await glossaryStore.updateEntry(currentEditId, cleanedEntry);
 			} else {
-				console.log('Adding new entry...');
+				glossaryLogger.debug('Adding new entry');
 				await glossaryStore.addEntry(cleanedEntry);
 			}
 			
-			console.log('Store error after save:', $glossaryStore.error);
-			
 			if (!$glossaryStore.error) {
-				console.log('Save successful, closing dialog');
+				glossaryLogger.info('Glossary entry save successful');
 				showAddDialog = false;
 				isEditing = false;
 				currentEditId = null;
 			} else {
-				console.error('Store error:', $glossaryStore.error);
+				glossaryLogger.error('Store error after save', { error: $glossaryStore.error });
 			}
-		} catch (error) {
-			console.error('Exception during save:', error);
+		} catch (error: any) {
+			glossaryLogger.error('Exception during save', error);
 		}
-		
-		console.log('=== GLOSSARY SAVE DEBUG END ===');
 	}
 
 	async function handleDelete(id: string) {
@@ -120,8 +124,8 @@
 			} else {
 				editingEntry.exceptions = {};
 			}
-		} catch (error) {
-			console.warn('Invalid JSON in exceptions field:', error);
+		} catch (error: any) {
+			logger.warn('Invalid JSON in exceptions field', { error: error.message });
 			// Keep the current exceptions object if JSON is invalid
 		}
 	}
@@ -155,25 +159,27 @@
 	}
 
 	async function refreshModules() {
-		console.log('🔄 Refreshing modules...');
+		const moduleLogger = logger.scope('ModuleRefresh');
+		moduleLogger.debug('Refreshing modules list');
 		try {
 			// Use the API endpoint instead of direct Supabase client
 			const response = await fetch('/api/modules');
-			console.log('📡 API response status:', response.status, response.statusText);
+			moduleLogger.debug('API response received', { status: response.status });
 			
 			const result = await response.json();
-			console.log('📦 API response data:', result);
 			
 			if (!response.ok) {
-				console.error('❌ Failed to load modules:', result.error || 'Unknown error');
+				moduleLogger.error('Failed to load modules', { error: result.error || 'Unknown error' });
 			} else {
 				// The API returns the modules array directly, not wrapped in an object
 				modules = result || [];
-				console.log('✅ Refreshed modules count:', modules.length);
-				console.log('📋 Module names:', modules.map(m => m.name));
+				moduleLogger.debug('Modules refreshed successfully', { 
+					moduleCount: modules.length,
+					moduleNames: modules.map(m => m.name)
+				});
 			}
-		} catch (error) {
-			console.error('💥 Error refreshing modules:', error);
+		} catch (error: any) {
+			moduleLogger.error('Error refreshing modules', error);
 		}
 	}
 </script>

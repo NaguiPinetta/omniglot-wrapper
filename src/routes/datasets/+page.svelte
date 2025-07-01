@@ -9,6 +9,7 @@
 	import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '$lib/components/ui/table';
 	import type { DatasetFormData, DatasetPreview } from '../../types/datasets';
 	import type { PageData } from './$types';
+	import { logger } from '$lib/utils/logger';
 
 	export let data: PageData;
 
@@ -28,9 +29,8 @@
 	});
 
 	async function handleUpload() {
-		console.log('=== DATASET UI DEBUG START ===');
-		console.log('handleUpload called');
-		console.log('FormData:', { 
+		const uploadLogger = logger.scope('DatasetUpload');
+		uploadLogger.debug('Starting dataset upload', { 
 			name: formData.name, 
 			description: formData.description, 
 			hasFile: !!formData.file,
@@ -38,31 +38,23 @@
 		});
 		
 		if (!formData.file) {
-			console.log('No file provided, returning early');
+			uploadLogger.debug('No file provided, aborting upload');
 			return;
 		}
 		
 		try {
-			console.log('Calling datasetStore.addDataset...');
 			await datasetStore.addDataset(formData);
-			console.log('Dataset store call completed');
-			console.log('Dataset store error:', $datasetStore.error);
+			uploadLogger.debug('Dataset store call completed', { hasError: !!$datasetStore.error });
 			
 			if (!$datasetStore.error) {
-				console.log('Upload successful, resetting form and closing modal');
+				uploadLogger.info('Dataset upload successful');
 				resetForm();
 				showModal = false;
-				console.log('=== DATASET UI DEBUG END (SUCCESS) ===');
 			} else {
-				console.log('Upload failed with store error:', $datasetStore.error);
-				console.log('=== DATASET UI DEBUG END (STORE ERROR) ===');
+				uploadLogger.error('Upload failed with store error', { error: $datasetStore.error });
 			}
-		} catch (error) {
-			console.error('=== DATASET UI DEBUG END (EXCEPTION) ===');
-			console.error('Upload error caught in UI:', error);
-			console.error('Error type:', typeof error);
-			console.error('Error message:', error instanceof Error ? error.message : String(error));
-			console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+		} catch (error: any) {
+			uploadLogger.error('Upload exception caught', error);
 		}
 	}
 
@@ -73,25 +65,29 @@
 	}
 
 	async function handleFileChange(event: Event) {
-		console.log('handleFileChange called', event);
+		const fileLogger = logger.scope('DatasetFileChange');
+		fileLogger.debug('File change event triggered');
 		const input = event.target as HTMLInputElement;
-		console.log('input.files:', input.files);
+		
 		if (input.files && input.files[0]) {
 			const file = input.files[0];
-			console.log('File selected:', file.name, file.size);
+			fileLogger.debug('File selected', { fileName: file.name, fileSize: file.size });
 			formData.file = file;
 			formData.name = formData.name || file.name.split('.').slice(0, -1).join('.');
 			formData = formData; // Trigger reactivity
-			console.log('formData updated:', formData);
+			
 			try {
 				preview = await previewFile(file);
-				console.log('Preview generated:', preview);
-			} catch (error) {
-				console.error('Error previewing file:', error);
+				fileLogger.debug('File preview generated', { 
+					totalRows: preview?.totalRows,
+					headerCount: preview?.headers.length
+				});
+			} catch (error: any) {
+				fileLogger.error('Error previewing file', error);
 				preview = null;
 			}
 		} else {
-			console.log('No file selected');
+			fileLogger.debug('No file selected');
 		}
 	}
 

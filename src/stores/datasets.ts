@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import type { Dataset, DatasetStore, DatasetFormData } from '../types/datasets';
 import { getDatasets, uploadAndCreateDataset, updateDataset, deleteDataset } from '../lib/datasets/api';
+import { logger } from '../lib/utils/logger';
 
 function createDatasetStore() {
   const { subscribe, set, update } = writable<DatasetStore>({
@@ -24,9 +25,8 @@ function createDatasetStore() {
     },
 
     async addDataset(formData: DatasetFormData) {
-      console.log('=== DATASET STORE DEBUG START ===');
-      console.log('Dataset store: Starting dataset upload...');
-      console.log('FormData:', { 
+      const storeLogger = logger.scope('DatasetStore');
+      storeLogger.debug('Starting dataset upload', { 
         name: formData.name, 
         description: formData.description, 
         hasFile: !!formData.file,
@@ -35,16 +35,12 @@ function createDatasetStore() {
       
       update(state => ({ ...state, loading: true, error: null }));
       try {
-        console.log('Dataset store: Calling uploadAndCreateDataset API...');
         const result = await uploadAndCreateDataset(formData);
-        console.log('Dataset store: Dataset uploaded successfully:', result.dataset.id);
-        console.log('Dataset store: Reloading datasets...');
+        storeLogger.debug('Dataset uploaded successfully', { datasetId: result.dataset.id });
         await this.loadDatasets();
-        console.log('Dataset store: Datasets reloaded successfully');
-        console.log('=== DATASET STORE DEBUG END (SUCCESS) ===');
+        storeLogger.info('Dataset creation completed successfully');
       } catch (error) {
-        console.error('=== DATASET STORE DEBUG END (ERROR) ===');
-        console.error('Dataset store: Error in addDataset:', error);
+        storeLogger.error('Error in addDataset', error);
         update(state => ({ 
           ...state, 
           loading: false, 

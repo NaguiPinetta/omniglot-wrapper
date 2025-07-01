@@ -10,6 +10,7 @@
 	import type { PageData } from './$types';
 	import { getUsageStats } from '../../lib/usage/api';
 	import type { UsageStats } from '../../lib/usage/api';
+	import { logger } from '$lib/utils/logger';
 
 	export let data: PageData;
 
@@ -36,8 +37,8 @@
 		loadingUsage = true;
 		try {
 			usageStats = await getUsageStats();
-		} catch (error) {
-			console.error('Failed to load usage stats:', error);
+		} catch (error: any) {
+			logger.error('Failed to load usage stats', error);
 		} finally {
 			loadingUsage = false;
 		}
@@ -53,24 +54,25 @@
 	});
 
 	async function handleAddApiKey() {
-		console.log('handleAddApiKey called with:', apiKeyForm);
+		const apiKeyLogger = logger.scope('ApiKeyAdd');
+		apiKeyLogger.debug('Adding API key', { provider: apiKeyForm.provider, hasKey: !!apiKeyForm.key_value });
 		
 		if (!apiKeyForm.provider || !apiKeyForm.key_value) {
-			console.log('Form validation failed:', { provider: apiKeyForm.provider, key_value: !!apiKeyForm.key_value });
+			apiKeyLogger.warn('Form validation failed', { 
+				hasProvider: !!apiKeyForm.provider, 
+				hasKey: !!apiKeyForm.key_value 
+			});
 			return;
 		}
 		
-		console.log('Calling modelStore.addApiKey...');
 		await modelStore.addApiKey(apiKeyForm);
 		
-		console.log('After addApiKey call, error:', $modelStore.error);
-		
 		if (!$modelStore.error) {
-			console.log('Success - clearing form and closing dialog');
+			apiKeyLogger.info('API key added successfully');
 			apiKeyForm = { provider: '', key_value: '' };
 			showApiKeyDialog = false;
 		} else {
-			console.log('Error occurred:', $modelStore.error);
+			apiKeyLogger.error('API key addition failed', { error: $modelStore.error });
 		}
 	}
 
