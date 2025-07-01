@@ -12,7 +12,7 @@
 		DialogTrigger
 	} from '$lib/components/ui/dialog';
 	import type { GlossaryFormData, GlossaryEntry } from '../../types/glossary';
-	import { getLanguageOptions } from '../../utils/helpers';
+	import { getLanguageOptions } from '$lib/utils';
 
 	// New: modules and filter state
 	export let data: { entries: GlossaryEntry[]; modules: any[]; error: string | null };

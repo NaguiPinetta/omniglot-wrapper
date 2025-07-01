@@ -1,7 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+const supabaseUrl = 'https://jdmgicxupcropwrzzpl.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabaseUrl = 'https://jdmgicxupcropwrzzzpl.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpkbWdpY3h1cGNyb3B3cnp6enBsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MDM1NjU0MywiZXhwIjoyMDY1OTMyNTQzfQ.ORGBKlGBJLUqJcIKqQcHI8Sp8FQcGDy3V9DfFPaKJLg';
+if (!supabaseKey) {
+  console.error('SUPABASE_SERVICE_ROLE_KEY environment variable is required');
+  process.exit(1);
+}
 
 async function runMigration() {
   console.log('🚀 Starting data ownership migration...');

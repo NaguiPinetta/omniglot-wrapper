@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/public';
 
 export const supabaseClient = createClient(
 	env.PUBLIC_SUPABASE_URL!,
-	env.PUBLIC_SUPABASE_ANON_KEY!,
+	env.PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
 	{
 		auth: {
 			autoRefreshToken: true,

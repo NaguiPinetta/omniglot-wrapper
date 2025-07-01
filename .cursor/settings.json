@@ -1,0 +1,19 @@
+{
+    "projectType": "typescript",
+    "framework": "sveltekit",
+    "language": "typescript",
+    "strictMode": true,
+    "formatOnSave": true,
+    "lintOnSave": true,
+    "enforceRules": true,
+    "maxParallelEdits": 1,
+    "askBeforeCommit": true,
+    "askBeforeRunMigration": true,
+    "environment": {
+      "OPENAI_API_KEY": "process.env.OPENAI_API_KEY",
+      "SUPABASE_URL": "process.env.SUPABASE_URL",
+      "SUPABASE_ANON_KEY": "process.env.SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY": "process.env.SUPABASE_SERVICE_ROLE_KEY"
+    }
+  }
+  

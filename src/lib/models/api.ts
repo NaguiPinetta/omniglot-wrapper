@@ -2,6 +2,12 @@ import { supabaseClient } from '../supabaseClient';
 import type { ApiKey, ApiKeyFormData, Model } from '../../types/models';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+// Helper function to get current user ID
+async function getCurrentUserId(client: SupabaseClient): Promise<string> {
+	const { data: { user } } = await client.auth.getUser();
+	return user?.id || '00000000-0000-0000-0000-000000000000';
+}
+
 // Models API
 export async function getModels({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Model[]> {
 	const { data, error } = await client.from('models').select('*').eq('is_active', true).order('provider, name');
@@ -61,7 +67,15 @@ export async function getModel(
 
 // API Keys API
 export async function getApiKeys({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<ApiKey[]> {
-	const { data, error } = await client.from('api_keys').select('*').order('provider, created_at');
+	// Get current user ID (authenticated or anonymous)
+	const userId = await getCurrentUserId(client);
+	console.log('getApiKeys - Using user ID:', userId);
+	
+	const { data, error } = await client
+		.from('api_keys')
+		.select('*')
+		.eq('user_id', userId)
+		.order('provider, created_at');
 	if (error) throw error;
 	return data ?? [];
 }
@@ -73,7 +87,16 @@ export async function createApiKey(
 	console.log('createApiKey called with:', apiKey);
 	console.log('Using client:', client ? 'provided' : 'default supabaseClient');
 	
-	const { data, error } = await client.from('api_keys').insert([apiKey]).select().single();
+	// Get current user ID (authenticated or anonymous)
+	const userId = await getCurrentUserId(client);
+	console.log('createApiKey - Using user ID:', userId);
+	
+	const apiKeyWithUser = {
+		...apiKey,
+		user_id: userId
+	};
+	
+	const { data, error } = await client.from('api_keys').insert([apiKeyWithUser]).select().single();
 	
 	console.log('Supabase response:', { data, error });
 	
@@ -120,10 +143,14 @@ export async function getApiKeyByProvider(
 	provider: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<ApiKey | null> {
+	// Get current user ID (authenticated or anonymous)
+	const userId = await getCurrentUserId(client);
+	
 	const { data, error } = await client
 		.from('api_keys')
 		.select('*')
 		.eq('provider', provider)
+		.eq('user_id', userId)
 		.single();
 	
 	if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"

@@ -28,7 +28,8 @@ async function getCurrentUserId(client: SupabaseClient): Promise<string> {
 	}
 	
 	console.error('Authentication failed - no user found for dataset');
-	throw new Error('User not authenticated. Please log in again.');
+	console.log('No user found, using anonymous ID');
+	return '00000000-0000-0000-0000-000000000000';
 }
 
 // --- Database CRUD Functions ---
@@ -36,7 +37,7 @@ async function getCurrentUserId(client: SupabaseClient): Promise<string> {
 export async function getDatasets({
 	client = supabase
 }: { client?: SupabaseClient } = {}): Promise<Dataset[]> {
-	const { data, error } = await client.from('datasets').select('*').order('uploaded_at', { ascending: false });
+	const { data, error } = await client.from('datasets').select('id, name, file_url, row_count, columns, user_id, uploaded_at').order('uploaded_at', { ascending: false });
 	if (error) throw error;
 	
 	// Map the database fields to match the expected Dataset interface
@@ -73,7 +74,7 @@ export async function getDataset(
 	id: string,
 	{ client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<Dataset> {
-	const { data, error } = await client.from('datasets').select('*, file_content').eq('id', id).single();
+	const { data, error } = await client.from('datasets').select('id, name, file_url, row_count, columns, user_id, uploaded_at, file_content').eq('id', id).single();
 	if (error) throw error;
 	
 	// Determine file type from file_url extension
@@ -358,67 +359,130 @@ export async function getDatasetPreview(
   datasetId: string,
   { client = supabase }: { client?: SupabaseClient } = {}
 ): Promise<DatasetPreview> {
-  const { data, error } = await client
-    .from('datasets')
-    .select('file_content, columns, file_url')
-    .eq('id', datasetId)
-    .single();
+  console.log('=== GET DATASET PREVIEW DEBUG START ===');
+  console.log('Dataset ID:', datasetId);
+  console.log('Client provided:', !!client);
   
-  if (error) throw error;
-  
-  if (!data.file_content) {
-    throw new Error('Dataset content not found. Please re-upload the dataset.');
-  }
-  
-  // Determine file type from columns or file_url
-  let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
-  if (data.file_url && typeof data.file_url === 'string') {
-    const ext = data.file_url.split('.').pop()?.toLowerCase();
-    if (ext === 'xml') fileType = 'xml';
-    else if (ext === 'json') fileType = 'json';
-    else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
-    else fileType = 'csv';
-  }
+  try {
+    console.log('Executing database query...');
+    const { data, error } = await client
+      .from('datasets')
+      .select('file_content, columns, file_url')
+      .eq('id', datasetId)
+      .single();
+    
+    console.log('Database query result:', { hasData: !!data, error });
+    
+    if (error) {
+      console.error('Database error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      throw error;
+    }
+    
+    if (!data.file_content) {
+      console.error('No file content found for dataset');
+      throw new Error('Dataset content not found. Please re-upload the dataset.');
+    }
+    
+    console.log('File content found, length:', data.file_content.length);
+    console.log('Columns:', data.columns);
+    console.log('File URL:', data.file_url);
+    
+    // Determine file type from columns or file_url
+    let fileType: 'csv' | 'xlsx' | 'json' | 'xml' = 'csv';
+    if (data.file_url && typeof data.file_url === 'string') {
+      const ext = data.file_url.split('.').pop()?.toLowerCase();
+      if (ext === 'xml') fileType = 'xml';
+      else if (ext === 'json') fileType = 'json';
+      else if (ext === 'xlsx' || ext === 'xls') fileType = 'xlsx';
+      else fileType = 'csv';
+    }
+    
+    console.log('Detected file type:', fileType);
 
-  if (fileType === 'xml') {
-    const parser = new XMLParser({ ignoreAttributes: false });
-    const xml = parser.parse(data.file_content);
-    // Assume structure: <root><data name="..."><value>...</value></data>...</root>
-    const dataArray = Array.isArray(xml.root?.data) ? xml.root.data : [xml.root?.data].filter(Boolean);
-    const rows = (dataArray || []).map((entry: any) => ({
-      key: entry['@_name'] || '',
-      value: entry.value || ''
-    }));
-    return {
-      headers: ['key', 'value'],
-      rows: rows.slice(0, 5),
-      totalRows: rows.length
-    };
-  }
+    if (fileType === 'xml') {
+      console.log('Processing XML file...');
+      const parser = new XMLParser({ ignoreAttributes: false });
+      const xml = parser.parse(data.file_content);
+      
+      let rows: { key: string, value: string }[] = [];
+      
+      // Support multiple XML structures
+      if (xml.wGlnWirelessResourceDocument && xml.wGlnWirelessResourceDocument.ResourceEntry) {
+        const entries = Array.isArray(xml.wGlnWirelessResourceDocument.ResourceEntry)
+          ? xml.wGlnWirelessResourceDocument.ResourceEntry
+          : [xml.wGlnWirelessResourceDocument.ResourceEntry];
+        rows = entries.map((entry: any) => ({
+          key: entry['@_ID'] || '',
+          value: entry['@_Value'] || ''
+        }));
+      } else if (xml.root?.data) {
+        // Fallback structure
+        const dataArray = Array.isArray(xml.root.data) ? xml.root.data : [xml.root.data].filter(Boolean);
+        rows = (dataArray || []).map((entry: any) => ({
+          key: entry['@_name'] || '',
+          value: entry.value || ''
+        }));
+      }
+      
+      const result = {
+        headers: ['key', 'value'],
+        rows: rows.slice(0, 5),
+        totalRows: rows.length
+      };
+      
+      console.log('XML processing complete:', result);
+      console.log('=== GET DATASET PREVIEW DEBUG END (XML SUCCESS) ===');
+      return result;
+    }
 
-  // Default: CSV logic
-  return new Promise((resolve, reject) => {
-    const config = {
-      header: true,
-      complete: (results: Papa.ParseResult<Record<string, any>>) => {
-        const allRows = results.data.filter(row => 
-          // Filter out empty rows
-          Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
-        );
-        
-        resolve({
-          headers: results.meta.fields || data.columns || [],
-          rows: allRows.slice(0, 5).map(row => 
-            Object.entries(row).reduce((acc, [key, value]) => {
-              acc[key] = String(value ?? '');
-              return acc;
-            }, {} as Record<string, string>)
-          ),
-          totalRows: allRows.length
-        });
-      },
-      error: (error: Papa.ParseError) => reject(error)
-    };
-    Papa.parse(data.file_content, config);
-  });
+    // Default: CSV logic
+    console.log('Processing CSV file...');
+    return new Promise((resolve, reject) => {
+      const config = {
+        header: true,
+        complete: (results: Papa.ParseResult<Record<string, any>>) => {
+          console.log('Papa Parse complete:', { 
+            dataLength: results.data.length, 
+            fieldsLength: results.meta.fields?.length,
+            errors: results.errors 
+          });
+          
+          const allRows = results.data.filter(row => 
+            // Filter out empty rows
+            Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+          );
+          
+          const result = {
+            headers: results.meta.fields || data.columns || [],
+            rows: allRows.slice(0, 5).map(row => 
+              Object.entries(row).reduce((acc, [key, value]) => {
+                acc[key] = String(value ?? '');
+                return acc;
+              }, {} as Record<string, string>)
+            ),
+            totalRows: allRows.length
+          };
+          
+          console.log('CSV processing complete:', result);
+          console.log('=== GET DATASET PREVIEW DEBUG END (CSV SUCCESS) ===');
+          resolve(result);
+        },
+        error: (error: Papa.ParseError) => {
+          console.error('Papa Parse error:', error);
+          console.log('=== GET DATASET PREVIEW DEBUG END (CSV ERROR) ===');
+          reject(error);
+        }
+      };
+      Papa.parse(data.file_content, config);
+    });
+  } catch (error) {
+    console.error('=== GET DATASET PREVIEW DEBUG END (ERROR) ===');
+    console.error('Unexpected error in getDatasetPreview:', error);
+    throw error;
+  }
 }

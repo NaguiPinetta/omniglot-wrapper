@@ -3,10 +3,10 @@ import { env } from '$env/dynamic/public';
 import type { User, Session } from '@supabase/supabase-js';
 import { writable } from 'svelte/store';
 
-// Create Supabase client for auth
+// Create a single supabase client for interacting with your database
 export const supabase = createClient(
-  env.PUBLIC_SUPABASE_URL!,
-  env.PUBLIC_SUPABASE_ANON_KEY!
+	env.PUBLIC_SUPABASE_URL!,
+	env.PUBLIC_SUPABASE_PUBLISHABLE_KEY!
 );
 
 // Auth stores

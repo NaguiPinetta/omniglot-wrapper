@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from '$env/static/private';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '$env/static/private';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RequestEvent } from '@sveltejs/kit';
 
@@ -15,9 +15,9 @@ export const createServerSupabaseClient = async (event: RequestEvent): Promise<S
 	};
 
 	console.log('DEBUG: SUPABASE_URL:', SUPABASE_URL);
-	console.log('DEBUG: SUPABASE_ANON_KEY:', SUPABASE_ANON_KEY);
+	console.log('DEBUG: SUPABASE_PUBLISHABLE_KEY:', SUPABASE_PUBLISHABLE_KEY);
 
-	const client = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+	const client = createClient(SUPABASE_URL!, SUPABASE_PUBLISHABLE_KEY!, {
 		global: {
 			fetch: wrappedFetch
 		},

@@ -1,32 +1,19 @@
 import { supabase as supabaseClient } from '../auth/client';
 import type { Agent, AgentFormData, AgentResponse } from '../../types/agents';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createApiLogger } from '../utils/logger';
+
+const logger = createApiLogger('AgentsAPI');
 
 export async function getAgents({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Agent[]> {
-	console.log('=== AGENTS API DEBUG START ===');
-	console.log('Client type:', client === supabaseClient ? 'supabaseClient' : 'server client');
-	
-	// Check current user/session
-	const { data: { user }, error: userError } = await client.auth.getUser();
-	console.log('Current user:', user?.email || 'No user');
-	console.log('User error:', userError);
-	
-	const { data: { session }, error: sessionError } = await client.auth.getSession();
-	console.log('Current session:', !!session);
-	console.log('Session error:', sessionError);
-	
-	// Try to get agents
 	const { data, error } = await client.from('agents').select('*');
-	console.log('Agents query result - data:', data);
-	console.log('Agents query result - error:', error);
-	console.log('Agents count:', data?.length || 0);
 	
 	if (error) {
-		console.log('=== AGENTS API DEBUG END (ERROR) ===');
+		logger.error('Failed to get agents', error);
 		throw error;
 	}
 	
-	console.log('=== AGENTS API DEBUG END ===');
+	logger.debug(`Retrieved ${data?.length || 0} agents`);
 	return data ?? [];
 }
 
@@ -44,12 +31,16 @@ export async function createAgent(
 	agent: Omit<Agent, 'id' | 'created_at'>,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Agent> {
-	console.log('createAgent API called with:', agent);
+	logger.debug('Creating agent', { name: agent.custom_name, model: agent.model });
 	const { data, error } = await client.from('agents').insert([agent]).select().single();
-	console.log('createAgent API - data:', data);
-	console.log('createAgent API - error:', error);
-  if (error) throw error;
-  return data;
+	
+	if (error) {
+		logger.error('Failed to create agent', error);
+		throw error;
+	}
+	
+	logger.info('Agent created successfully', { id: data.id, name: data.custom_name });
+	return data;
 }
 
 export async function updateAgent(
@@ -148,6 +139,6 @@ export async function executeAgent(
 
 export async function testConnection({ client = supabaseClient }: { client?: SupabaseClient } = {}) {
 	const { data, error } = await client.from('agents').select('*').limit(1);
-  if (error) console.error('❌ Supabase error:', error.message);
-  else console.log('✅ Supabase connected. Example data:', data);
+  if (error) logger.error('Supabase connection test failed', error);
+  else logger.info('Supabase connection test successful', { sampleCount: data?.length || 0 });
 } 

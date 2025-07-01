@@ -8,7 +8,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
-	import { getLanguageOptions } from '../../utils/helpers';
+	import { getLanguageOptions } from '$lib/utils';
 	import type { JobFormData, Job } from '../../types/jobs';
 	import type { PageData } from './$types';
 
@@ -61,28 +61,8 @@
 	});
 
 	async function handleSubmit() {
-		console.log('=== JOB CREATION DEBUG START ===');
-		console.log('Form data:', formData);
-		console.log('Column mapping:', columnMapping);
-		console.log('Agent store state:', { 
-			agents: $agentStore.agents, 
-			loading: $agentStore.loading, 
-			error: $agentStore.error 
-		});
-		console.log('Dataset store state:', { 
-			datasets: $datasetStore.datasets, 
-			loading: $datasetStore.loading, 
-			error: $datasetStore.error 
-		});
-		console.log('Job store state:', { 
-			jobs: $jobStore.jobs, 
-			loading: $jobStore.loading, 
-			error: $jobStore.error 
-		});	
-		
 		// Validate required column mapping
 		if (!columnMapping.source_text_column) {
-			console.error('Validation failed: No source text column selected');
 			alert('Please select a Source Text Column');
 			return;
 		}
@@ -95,8 +75,6 @@
 		
 		// Get the selected agent's prompt
 		const selectedAgent = $agentStore.agents.find(a => a.id === formData.agent_id);
-		console.log('Selected agent:', selectedAgent);
-		
 		const agentPrompt = selectedAgent?.prompt || '';
 		
 		// Combine agent prompt with user instructions
@@ -114,33 +92,23 @@
 			glossary_usage_mode: formData.glossary_usage_mode as 'prefer' | 'enforce' | 'ignore'
 		};
 		
-		console.log('Final job data to submit:', enhancedJobData);
-		
 		if (!formData.name || formData.name.trim() === '') {
-			console.error('Validation failed: No job name entered');
 			alert('Please enter a job name.');
 			return;
 		}
 		
 		try {
-			console.log('Calling jobStore.addJob...');
 			await jobStore.addJob(enhancedJobData);
-			console.log('jobStore.addJob completed');
 			
 			if ($jobStore.error) {
-				console.error('Job store has error:', $jobStore.error);
 				alert(`Failed to create job: ${$jobStore.error}`);
 			} else {
-				console.log('Job creation successful, resetting form...');
 				resetForm();
 				showModal = false;
 			}
 		} catch (error: any) {
-			console.error('Exception during job creation:', error);
 			alert(`Failed to create job: ${error instanceof Error ? error.message : 'Unknown error'}`);
 		}
-		
-		console.log('=== JOB CREATION DEBUG END ===');
 	}
 
 	function resetForm() {
@@ -386,17 +354,15 @@
 
 	async function loadDatasetPreview(datasetId: string) {
 		console.log('=== LOAD DATASET PREVIEW DEBUG START ===');
-		console.log('Loading preview for dataset ID:', datasetId);
+		console.log('Loading preview for dataset:', datasetId);
 		
 		if (!datasetId) {
-			selectedDatasetPreview = [];
-			availableColumns = [];
-			selectedDataset = null;
 			console.log('No dataset ID provided, clearing preview');
 			return;
 		}
 
 		loadingPreview = true;
+		
 		try {
 			// Get the selected dataset to check its file type
 			selectedDataset = $datasetStore.datasets.find(d => d.id === datasetId);
@@ -406,17 +372,20 @@
 				throw new Error('Dataset not found in store');
 			}
 			
-			// Try to import and call getDatasetPreview
-			console.log('Importing getDatasetPreview function...');
-			const { getDatasetPreview } = await import('../../lib/datasets/api');
-			console.log('Calling getDatasetPreview...');
-			const preview = await getDatasetPreview(datasetId);
-			console.log('Dataset preview result:', preview);
+					// Use the same API endpoint as the test function
+		console.log('Calling dataset preview API...');
+		const response = await fetch(`/api/datasets/${datasetId}/preview`);
+		if (!response.ok) {
+			throw new Error(`Failed to get dataset preview: ${response.status}`);
+		}
+		
+		const previewRows = await response.json();
+		console.log('Dataset preview API result:', previewRows);
+		
+		selectedDatasetPreview = previewRows || [];
+		availableColumns = Object.keys(previewRows[0] || {});
 			
-			selectedDatasetPreview = preview.rows || [];
-			availableColumns = preview.headers || [];
-			
-			console.log('Loaded real dataset preview:', preview);
+			console.log('Loaded real dataset preview:', previewRows);
 			console.log('Available columns:', availableColumns);
 			console.log('Dataset file type:', selectedDataset?.file_type);
 			
@@ -470,8 +439,13 @@
 				selectedDatasetPreview = [];
 				availableColumns = [];
 				selectedDataset = null;
-				alert('Failed to load dataset preview. The dataset may be corrupted or in an unsupported format.');
+				// Don't show alert, just log the error
+				console.error('Failed to load dataset preview. The dataset may be corrupted or in an unsupported format.');
 			}
+		} finally {
+			// ALWAYS reset loading state, regardless of success or failure
+			loadingPreview = false;
+			console.log('=== LOAD DATASET PREVIEW DEBUG END ===');
 		}
 		
 		// Set up column mapping regardless of how we got the preview
@@ -530,9 +504,6 @@
 			
 			console.log('Column mapping set:', columnMapping);
 		}
-		
-		loadingPreview = false;
-		console.log('=== LOAD DATASET PREVIEW DEBUG END ===');
 	}
 
 	// Manual dataset change handler

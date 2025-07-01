@@ -36,18 +36,15 @@ function createAgentStore() {
     },
 
 		async addAgent(agentData: Omit<Agent, 'id' | 'created_at'>) {
-			console.log('addAgent called with:', agentData);
 			update(state => ({ ...state, loading: true, error: null }));
 			try {
 				const newAgent = await createAgent(agentData);
-				console.log('createAgent returned:', newAgent);
       update(state => ({
         ...state,
 					agents: [newAgent, ...state.agents],
 					loading: false
       }));
 			} catch (error) {
-				console.error('addAgent error:', error);
 				const errorMessage = error instanceof Error ? error.message : 'Failed to create agent';
 				update(state => ({ ...state, loading: false, error: errorMessage }));
 			}

@@ -2,64 +2,61 @@ import type { PageServerLoad } from './$types';
 import { env } from '$env/dynamic/public';
 
 export const load: PageServerLoad = async ({ fetch }) => {
+	const headers = {
+		'Content-Type': 'application/json',
+		'apikey': env.PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+		'Authorization': `Bearer ${env.PUBLIC_SUPABASE_PUBLISHABLE_KEY}`,
+	};
+
 	try {
-		// Test basic fetch to Supabase without our wrapper
-		const url = `${env.PUBLIC_SUPABASE_URL}/rest/v1/agents?select=*&limit=1`;
-		const headers = {
-			'apikey': env.PUBLIC_SUPABASE_ANON_KEY!,
-			'Authorization': `Bearer ${env.PUBLIC_SUPABASE_ANON_KEY}`,
-			'Content-Type': 'application/json'
-		};
-
-		console.log('Testing direct fetch to:', url);
-		console.log('Headers:', { ...headers, apikey: 'HIDDEN', Authorization: 'HIDDEN' });
-
-		const response = await fetch(url, {
-			method: 'GET',
-			headers
+		// Test basic connection
+		const response = await fetch(`${env.PUBLIC_SUPABASE_URL}/rest/v1/`, {
+			headers,
 		});
 
-		console.log('Response status:', response.status);
-		console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+		const isConnected = response.ok;
+		const statusCode = response.status;
 
-		if (!response.ok) {
-			const errorText = await response.text();
-			console.log('Error response:', errorText);
-			return {
-				success: false,
-				error: `HTTP ${response.status}: ${response.statusText}`,
-				details: errorText,
-				url,
-				env: {
-					url: env.PUBLIC_SUPABASE_URL,
-					keyLength: env.PUBLIC_SUPABASE_ANON_KEY?.length
-				}
-			};
-		}
+		// Test agents table
+		const agentsResponse = await fetch(`${env.PUBLIC_SUPABASE_URL}/rest/v1/agents?select=*&limit=1`, {
+			headers,
+		});
 
-		const data = await response.json();
-		console.log('Success! Data:', data);
+		const agentsData = agentsResponse.ok ? await agentsResponse.json() : null;
+		const agentsError = agentsResponse.ok ? null : await agentsResponse.text();
+
+		// Test glossaries table
+		const glossariesResponse = await fetch(`${env.PUBLIC_SUPABASE_URL}/rest/v1/glossaries?select=*&limit=1`, {
+			headers,
+		});
+
+		const glossariesData = glossariesResponse.ok ? await glossariesResponse.json() : null;
+		const glossariesError = glossariesResponse.ok ? null : await glossariesResponse.text();
 
 		return {
-			success: true,
-			data,
-			url,
-			env: {
+			supabase: {
 				url: env.PUBLIC_SUPABASE_URL,
-				keyLength: env.PUBLIC_SUPABASE_ANON_KEY?.length
+				keyLength: env.PUBLIC_SUPABASE_PUBLISHABLE_KEY?.length
+			},
+			connection: {
+				isConnected,
+				statusCode
+			},
+			agents: {
+				data: agentsData,
+				error: agentsError,
+				keyLength: env.PUBLIC_SUPABASE_PUBLISHABLE_KEY?.length
+			},
+			glossaries: {
+				data: glossariesData,
+				error: glossariesError,
+				keyLength: env.PUBLIC_SUPABASE_PUBLISHABLE_KEY?.length
 			}
 		};
-
 	} catch (error) {
-		console.error('Fetch error:', error);
+		console.error('Debug page error:', error);
 		return {
-			success: false,
-			error: error instanceof Error ? error.message : 'Unknown error',
-			details: error,
-			env: {
-				url: env.PUBLIC_SUPABASE_URL,
-				keyLength: env.PUBLIC_SUPABASE_ANON_KEY?.length
-			}
+			error: error instanceof Error ? error.message : 'Unknown error'
 		};
 	}
 }; 

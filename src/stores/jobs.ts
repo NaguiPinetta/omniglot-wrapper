@@ -24,17 +24,11 @@ function createJobStore() {
     },
 
     async addJob(jobData: JobFormData) {
-      console.log('Job store: Starting job creation...');
       update(state => ({ ...state, loading: true, error: null }));
       try {
-        console.log('Job store: Calling createJob API...');
         const newJob = await createJob(jobData);
-        console.log('Job store: Job created successfully:', newJob.id);
-        console.log('Job store: Reloading jobs...');
         await this.loadJobs();
-        console.log('Job store: Jobs reloaded successfully');
       } catch (error) {
-        console.error('Job store: Error in addJob:', error);
         update(state => ({ 
           ...state, 
           loading: false, 
@@ -65,17 +59,11 @@ function createJobStore() {
     },
 
     async startJob(id: string) {
-      console.log('Job store: Starting job with ID:', id);
       update(state => ({ ...state, loading: true, error: null }));
       try {
-        console.log('Job store: Calling startJob API...');
         await startJob(id);
-        console.log('Job store: Job started successfully');
-        console.log('Job store: Reloading jobs...');
         await this.loadJobs();
-        console.log('Job store: Jobs reloaded after start');
       } catch (error) {
-        console.error('Job store: Error in startJob:', error);
         update(state => ({ 
           ...state, 
           loading: false, 

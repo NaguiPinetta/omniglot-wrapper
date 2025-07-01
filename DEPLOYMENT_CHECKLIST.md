@@ -28,9 +28,11 @@ Execute complete_auth_migration.sql in your Supabase SQL editor
 ### 2. Configure Environment Variables
 Set in your deployment environment:
 - PUBLIC_SUPABASE_URL
-- PUBLIC_SUPABASE_ANON_KEY
+- PUBLIC_SUPABASE_PUBLISHABLE_KEY
 - SUPABASE_URL (for server)
-- SUPABASE_ANON_KEY (for server)
+- SUPABASE_PUBLISHABLE_KEY (for server)
+- SUPABASE_SERVICE_ROLE_KEY
+- VITE_OPENAI_API_KEY
 
 ### 3. Supabase Auth Configuration
 - Configure magic link email templates

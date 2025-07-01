@@ -8,47 +8,51 @@ import { XMLParser } from 'fast-xml-parser';
 import { getModel, getApiKey } from '../models/api';
 import type { Dataset } from '../../types/datasets';
 import type { ColumnMapping } from '../../types/jobs';
+import pLimit from 'p-limit';
+import { createApiLogger } from '../utils/logger';
+
+const logger = createApiLogger('JobsAPI');
 
 // Helper function to get current user ID
 async function getCurrentUserId(client: SupabaseClient): Promise<string> {
-	console.log('Getting current user ID...');
+	logger.debug('Getting current user ID...');
 	
 	// Try to get user from session first
 	const { data: { session }, error: sessionError } = await client.auth.getSession();
-	console.log('Session check:', { session: !!session, user: session?.user?.email, error: sessionError });
+	logger.debug('Session check', { hasSession: !!session, user: session?.user?.email, error: sessionError });
 	
 	if (session?.user?.id) {
-		console.log('Found user ID from session:', session.user.id);
+		logger.debug('Found user ID from session', { userId: session.user.id });
 		return session.user.id;
 	}
 	
 	// Fallback: try to get user directly
 	const { data: { user }, error: userError } = await client.auth.getUser();
-	console.log('User check:', { user: user?.email, error: userError });
+	logger.debug('User check', { user: user?.email, error: userError });
 	
 	if (user?.id) {
-		console.log('Found user ID from getUser:', user.id);
+		logger.debug('Found user ID from getUser', { userId: user.id });
 		return user.id;
 	}
 	
-	console.error('Authentication failed - no user found');
+	logger.error('Authentication failed - no user found');
 	throw new Error('User not authenticated. Please log in again.');
 }
 
 // --- Database CRUD Functions ---
 
 export async function getJobs({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<Job[]> {
-	console.log('=== JOBS API DEBUG START ===');
-	console.log('Client type:', client === supabaseClient ? 'supabaseClient' : 'server client');
+	logger.debug('=== JOBS API DEBUG START ===');
+	logger.debug('Client type:', client === supabaseClient ? 'supabaseClient' : 'server client');
 	
 	// Check current user/session
 	const { data: { user }, error: userError } = await client.auth.getUser();
-	console.log('Current user:', user?.email || 'No user');
-	console.log('User error:', userError);
+	logger.debug('Current user:', user?.email || 'No user');
+	logger.debug('User error:', userError);
 	
 	const { data: { session }, error: sessionError } = await client.auth.getSession();
-	console.log('Current session:', !!session);
-	console.log('Session error:', sessionError);
+	logger.debug('Current session:', !!session);
+	logger.debug('Session error:', sessionError);
 	
 	// Try to get jobs
 	const { data, error } = await client
@@ -56,16 +60,16 @@ export async function getJobs({ client = supabaseClient }: { client?: SupabaseCl
 		.select('*')
 		.order('created_at', { ascending: false });
 	
-	console.log('Jobs query result - data:', data);
-	console.log('Jobs query result - error:', error);
-	console.log('Jobs count:', data?.length || 0);
+	logger.debug('Jobs query result - data:', data);
+	logger.debug('Jobs query result - error:', error);
+	logger.debug('Jobs count:', data?.length || 0);
 	
 	if (error) {
-		console.log('=== JOBS API DEBUG END (ERROR) ===');
+		logger.debug('=== JOBS API DEBUG END (ERROR) ===');
 		throw error;
 	}
 	
-	console.log('=== JOBS API DEBUG END ===');
+	logger.debug('=== JOBS API DEBUG END ===');
 	return data ?? [];
 }
 
@@ -82,12 +86,12 @@ export async function createJob(
 	jobData: JobFormData,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Job> {
-	console.log('createJob called with:', jobData);
+	logger.debug('createJob called with:', jobData);
 	
 	try {
 		// Get dataset to determine total_items
 		const dataset = await getDataset(jobData.dataset_id, { client });
-		console.log('Dataset retrieved:', dataset);
+		logger.debug('Dataset retrieved:', dataset);
 		
 		// Create a minimal job object first to test database insertion
 		const job = {
@@ -119,14 +123,18 @@ export async function createJob(
 		if (jobData.column_mapping) {
 			(job as any).column_mapping = jobData.column_mapping;
 		}
+		// Store glossary usage mode if provided (make optional for backward compatibility)
+		if (jobData.glossary_usage_mode) {
+			(job as any).glossary_usage_mode = jobData.glossary_usage_mode;
+		}
 
-		console.log('Job object to insert:', job);
+		logger.debug('Job object to insert:', job);
 		const { data, error } = await client.from('jobs').insert([job]).select().single();
-		console.log('Insert result - data:', data);
-		console.log('Insert result - error:', error);
+		logger.debug('Insert result - data:', data);
+		logger.debug('Insert result - error:', error);
 		
 		if (error) {
-			console.error('Database insertion failed:', {
+			logger.error('Database insertion failed:', {
 				message: error.message,
 				details: error.details,
 				hint: error.hint,
@@ -137,7 +145,7 @@ export async function createJob(
 		
 		return data;
 	} catch (error) {
-		console.error('createJob error:', error);
+		logger.error('createJob error:', error);
 		throw error;
 	}
 }
@@ -147,11 +155,11 @@ export async function updateJob(
 	updates: Partial<Job>,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Job> {
-	console.log('updateJob called with:', { id, updates });
+	logger.debug('updateJob called with:', { id, updates });
 	const { data, error } = await client.from('jobs').update(updates).eq('id', id).select().single();
-	console.log('updateJob result:', { data, error });
+	logger.debug('updateJob result:', { data, error });
 	if (error) {
-		console.error('updateJob error details:', error);
+		logger.error('updateJob error details:', error);
 		throw error;
 	}
 	return data;
@@ -185,35 +193,28 @@ export async function startJob(
 	id: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Job> {
-	console.log('startJob called with id:', id);
+	logger.debug('startJob called with id:', id);
 	const job = await getJob(id, { client });
-	console.log('Retrieved job:', job);
+	logger.debug('Retrieved job:', job);
 	
 	if (job.status !== 'pending' && job.status !== 'queued') {
 		const error = `Job is not in pending or queued status. Current status: ${job.status}`;
-		console.error(error);
+		logger.error(error);
 		throw new Error(error);
 	}
 
-	console.log('Updating job status to running...');
+	logger.debug('Updating job status to running...');
 	const updatedJob = await updateJob(id, {
 		status: 'running',
 		started_at: new Date().toISOString()
 	}, { client });
+	logger.debug('Job status updated:', updatedJob);
 
-	console.log('Job successfully updated to running, starting background processing...');
-	// Process job in the background (fire and forget) with error handling
-	processJobInBackground(id, { client }).catch(error => {
-		console.error(`Background processing failed for job ${id}:`, error);
-		// Mark job as failed if background processing fails
-		updateJob(id, {
-			status: 'failed',
-			completed_at: new Date().toISOString(),
-			error: error instanceof Error ? error.message : 'Background processing failed'
-		}, { client }).catch(updateError => {
-			console.error(`Failed to update job ${id} status after background processing failure:`, updateError);
-		});
-	});
+	// Start processing in background
+	logger.debug('Starting background processing...');
+	processJobInBackground(id, { client })
+		.then(() => logger.debug(`Background processing completed for job ${id}`))
+		.catch(error => logger.error(`Background processing failed for job ${id}:`, error));
 
 	return updatedJob;
 }
@@ -222,32 +223,33 @@ export async function cancelJob(
 	id: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Job> {
-	return await updateJob(id, {
+	const updatedJob = await updateJob(id, {
 		status: 'cancelled',
 		completed_at: new Date().toISOString()
 	}, { client });
+	return updatedJob;
 }
 
 async function processJobInBackground(
 	jobId: string,
 	{ client = supabaseClient, debug = false }: { client?: SupabaseClient, debug?: boolean } = {}
 ) {
-	console.log(`Starting background processing for job ${jobId}`);
+	logger.debug(`Starting background processing for job ${jobId}`);
 	try {
 		let job = await getJob(jobId, { client });
-		console.log('Job retrieved for processing:', job);
+		logger.debug('Job retrieved for processing:', job);
 		
 		const dataset = await getDataset(job.dataset_id, { client });
-		console.log('Dataset retrieved:', dataset);
+		logger.debug('Dataset retrieved:', dataset);
 		
 		// Get the agent and its prompt
 		const { getAgent } = await import('../agents/api');
 		const agent = await getAgent(job.agent_id, { client });
-		console.log('Agent retrieved:', agent);
+		logger.debug('Agent retrieved:', agent);
 		
 		// Get the model by agent.model_id
 		const model = await getModel(agent.model_id, { client });
-		console.log('Model retrieved:', model);
+		logger.debug('Model retrieved:', model);
 
 		// Get the API key by model.api_key_id
 		let apiKey = undefined;
@@ -259,8 +261,8 @@ async function processJobInBackground(
 		// Get glossary entries if glossary_id is specified and usage mode is not 'ignore'
 		let glossaryEntries: any[] = [];
 		if (job.glossary_id && job.glossary_usage_mode !== 'ignore') {
-			console.log('Fetching glossary entries for module:', job.glossary_id);
-			console.log('Target language for filtering:', job.target_language);
+			logger.debug('Fetching glossary entries for module:', job.glossary_id);
+			logger.debug('Target language for filtering:', job.target_language);
 			
 			const { data: entries, error } = await client
 				.from('glossary')
@@ -268,7 +270,7 @@ async function processJobInBackground(
 				.eq('module_id', job.glossary_id);
 			
 			if (error) {
-				console.error('Error fetching glossary entries:', error);
+				logger.error('Error fetching glossary entries:', error);
 			} else {
 				const allEntries = entries || [];
 				// Filter glossary entries to match target language
@@ -279,15 +281,15 @@ async function processJobInBackground(
 					entry.language === '*'
 				);
 				
-				console.log(`Loaded ${allEntries.length} total entries, filtered to ${glossaryEntries.length} entries matching target language '${job.target_language}'`);
+				logger.debug(`Loaded ${allEntries.length} total entries, filtered to ${glossaryEntries.length} entries matching target language '${job.target_language}'`);
 				if (glossaryEntries.length > 0) {
-					console.log('Filtered glossary entries:', glossaryEntries.map(e => `${e.term} → ${e.translation}`));
+					logger.debug('Filtered glossary entries:', glossaryEntries.map(e => `${e.term} → ${e.translation}`));
 				}
 			}
 		}
 
 		// Process the dataset and perform translations
-		console.log('Starting actual translation processing...');
+		logger.debug('Starting actual translation processing...');
 		
 		// Determine file type and parse content accordingly
 		let allRows: Record<string, string>[] = [];
@@ -319,7 +321,7 @@ async function processJobInBackground(
 					value: entry.value || ''
 				}));
 			}
-			console.log('[DEBUG] Parsed XML rows:', rows);
+			logger.debug('[DEBUG] Parsed XML rows:', rows);
 			allRows = rows;
 		} else if (dataset.file_content) {
 			// Parse CSV content
@@ -348,108 +350,124 @@ async function processJobInBackground(
 			progress: 0
 		}, { client });
 
-		for (let i = 0; i < totalRows; i++) {
-			job = await getJob(jobId, { client });
-			if (job.status === 'cancelled') {
-				console.log('Job was cancelled, stopping processing');
-				break;
-			}
-			
-			try {
-				const row = allRows[i];
-				
-				// Handle XML vs CSV differently for source text extraction
-				let sourceText: string;
-				let rowId: string;
-				let sourceLang: string;
-				
-				if (isXmlDataset) {
-					// For XML, use 'value' column as source text and 'key' as row ID
-					sourceText = row.value || '';
-					rowId = row.key || `xml_entry_${i + 1}`;
-					sourceLang = job.source_language || 'en';
-				} else {
-					// For CSV, use column mapping
-					sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
-					rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${i + 1}`;
-					sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
+		// Create concurrency limiter (max 5 concurrent requests)
+		const limit = pLimit(5);
+		
+		// Helper function for exponential backoff retry
+		async function retryWithBackoff<T>(
+			fn: () => Promise<T>,
+			maxRetries: number = 3,
+			baseDelay: number = 1000
+		): Promise<T> {
+			for (let attempt = 0; attempt <= maxRetries; attempt++) {
+				try {
+					return await fn();
+				} catch (error: any) {
+					const isRateLimit = error.message?.includes('rate limit') || 
+									   error.message?.includes('429') ||
+									   error.message?.includes('Too Many Requests');
+					
+					if (attempt === maxRetries || !isRateLimit) {
+						throw error;
+					}
+					
+					// Exponential backoff with jitter
+					const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+					logger.debug(`Rate limit hit, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+					await new Promise(resolve => setTimeout(resolve, delay));
 				}
+			}
+			throw new Error('Max retries exceeded');
+		}
 
-				if (!sourceText || sourceText.trim() === '') {
-					const skipInfo = {
+		// Process translations with concurrency
+		const translateRow = async (row: any, index: number) => {
+			// Check if job was cancelled
+			const currentJob = await getJob(jobId, { client });
+			if (currentJob.status === 'cancelled') {
+				throw new Error('Job was cancelled');
+			}
+
+			// Handle XML vs CSV differently for source text extraction
+			let sourceText: string;
+			let rowId: string;
+			let sourceLang: string;
+			
+			if (isXmlDataset) {
+				// For XML, use 'value' column as source text and 'key' as row ID
+				sourceText = row.value || '';
+				rowId = row.key || `xml_entry_${index + 1}`;
+				sourceLang = job.source_language || 'en';
+			} else {
+				// For CSV, use column mapping
+				sourceText = columnMapping.source_text_column ? (row[columnMapping.source_text_column] || '') : '';
+				rowId = columnMapping.row_id_column ? row[columnMapping.row_id_column] : `row_${index + 1}`;
+				sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
+			}
+
+			if (!sourceText || sourceText.trim() === '') {
+				return {
+					type: 'skip',
+					skipInfo: {
 						row_id: rowId,
-						row_number: i + 1,
+						row_number: index + 1,
 						reason: 'Empty source text',
 						data: row
-					};
-					console.log('Skipping row:', skipInfo);
-					skippedRows.push(skipInfo);
-					continue;
+					}
+				};
+			}
+
+			// Build system prompt with glossary if available
+			let systemPrompt = agent.prompt;
+			if (glossaryEntries.length > 0) {
+				const glossaryText = glossaryEntries
+					.map(entry => `${entry.term} → ${entry.translation}${entry.context ? ` (${entry.context})` : ''}`)
+					.join('\n');
+				systemPrompt += `\n\nGlossary terms to use:\n${glossaryText}`;
+			}
+
+			// Prepare messages for translation
+			const messages = [
+				{
+					role: 'system',
+					content: systemPrompt
+				},
+				{
+					role: 'user',
+					content: `Translate the following text from ${sourceLang} to ${targetLang}:\n\n${sourceText}`
 				}
-				
-				let targetText = '';
-				try {
-					// Build system prompt with glossary if available
-					let systemPrompt = agent.prompt;
-					if (glossaryEntries.length > 0) {
-						const glossaryText = glossaryEntries
-							.map(entry => `${entry.term} → ${entry.translation}${entry.context ? ` (${entry.context})` : ''}`)
-							.join('\n');
-						systemPrompt += `\n\nGlossary terms to use:\n${glossaryText}`;
-					}
+			];
 
-					// Prepare messages for translation
-					const messages = [
-						{
-							role: 'system',
-							content: systemPrompt
-						},
-						{
-							role: 'user',
-							content: `Translate the following text from ${sourceLang} to ${targetLang}:\n\n${sourceText}`
-						}
-					];
+			// Translation with retry logic
+			const targetText = await retryWithBackoff(async () => {
+				const response = await fetch('/api/chat', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({
+						model: model.name,
+						messages: messages,
+						api_key: apiKey,
+						glossary: glossaryEntries
+					})
+				});
 
-					// Make API call to translation service
-					const response = await fetch('/api/chat', {
-						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json'
-						},
-						body: JSON.stringify({
-							model: model.name,
-							messages: messages,
-							api_key: apiKey,
-							glossary: glossaryEntries
-						})
-					});
-
-					if (!response.ok) {
-						throw new Error(`Translation API error: ${response.status}`);
-					}
-
-					const result = await response.json();
-					targetText = result.choices?.[0]?.message?.content || '';
-					
-					// Estimate tokens and cost (simplified)
-					const estimatedTokens = Math.ceil((sourceText.length + targetText.length) / 4);
-					totalTokens += estimatedTokens;
-					totalCost += estimatedTokens * 0.0001; // Rough estimate
-
-				} catch (translationError) {
-					console.error(`Translation failed for row ${i + 1}:`, translationError);
-					const skipInfo = {
-						row_id: rowId,
-						row_number: i + 1,
-						reason: `Translation failed: ${translationError.message}`,
-						data: row
-					};
-					skippedRows.push(skipInfo);
-					continue;
+				if (!response.ok) {
+					const errorText = await response.text();
+					throw new Error(`Translation API error: ${response.status} - ${errorText}`);
 				}
 
-				// Save translation result
-				const translationResult = {
+				const result = await response.json();
+				return result.choices?.[0]?.message?.content || '';
+			});
+
+			// Estimate tokens and cost (simplified)
+			const estimatedTokens = Math.ceil((sourceText.length + targetText.length) / 4);
+
+			return {
+				type: 'success',
+				result: {
 					job_id: jobId,
 					row_id: rowId,
 					source_text: sourceText,
@@ -457,51 +475,116 @@ async function processJobInBackground(
 					source_language: sourceLang,
 					target_language: targetLang,
 					status: 'completed',
-					confidence: 0.95, // Default confidence
+					confidence: 0.95,
 					created_at: new Date().toISOString()
-				};
+				},
+				tokens: estimatedTokens,
+				cost: estimatedTokens * 0.0001
+			};
+		};
 
-				const { error: insertError } = await client
-					.from('translations')
-					.insert([translationResult]);
+		// Process rows in batches with concurrency
+		const BATCH_SIZE = 10;
+		let currentBatch = 0;
+		
+		for (let batchStart = 0; batchStart < totalRows; batchStart += BATCH_SIZE) {
+			const batchEnd = Math.min(batchStart + BATCH_SIZE, totalRows);
+			const batch = allRows.slice(batchStart, batchEnd);
+			currentBatch++;
+			
+			logger.debug(`Processing batch ${currentBatch} (rows ${batchStart + 1}-${batchEnd})`);
 
-				if (insertError) {
-					console.error('Failed to save translation:', insertError);
-					const skipInfo = {
-						row_id: rowId,
-						row_number: i + 1,
-						reason: `Database save failed: ${insertError.message}`,
+			try {
+				// Process batch with concurrency
+				const batchPromises = batch.map((row, batchIndex) => 
+					limit(() => translateRow(row, batchStart + batchIndex))
+				);
+
+				const batchResults = await Promise.allSettled(batchPromises);
+				
+				// Separate successful translations and skipped rows
+				const batchTranslations: any[] = [];
+				const batchSkipped: any[] = [];
+				let batchTokens = 0;
+				let batchCost = 0;
+
+				batchResults.forEach((result, batchIndex) => {
+					if (result.status === 'fulfilled') {
+						if (result.value.type === 'success') {
+							batchTranslations.push(result.value.result);
+							batchTokens += result.value.tokens || 0;
+							batchCost += result.value.cost || 0;
+						} else if (result.value.type === 'skip') {
+							batchSkipped.push(result.value.skipInfo);
+						}
+					} else {
+						// Handle rejected promises
+						const rowIndex = batchStart + batchIndex;
+						logger.error(`Translation failed for row ${rowIndex + 1}:`, result.reason);
+						batchSkipped.push({
+							row_id: `row_${rowIndex + 1}`,
+							row_number: rowIndex + 1,
+							reason: `Translation failed: ${result.reason}`,
+							data: batch[batchIndex]
+						});
+					}
+				});
+
+				// Batch database insert for successful translations
+				if (batchTranslations.length > 0) {
+					const { error: insertError } = await client
+						.from('translations')
+						.insert(batchTranslations);
+
+					if (insertError) {
+						logger.error('Batch database insert failed:', insertError);
+						// Mark all translations in this batch as skipped
+						batchTranslations.forEach((translation, index) => {
+							batchSkipped.push({
+								row_id: translation.row_id,
+								row_number: batchStart + index + 1,
+								reason: `Database save failed: ${insertError.message}`,
+								data: batch[index]
+							});
+						});
+					} else {
+						completedRows.push(...batchTranslations);
+						processedCount += batchTranslations.length;
+					}
+				}
+
+				// Add skipped rows
+				skippedRows.push(...batchSkipped);
+				
+				// Update totals
+				totalTokens += batchTokens;
+				totalCost += batchCost;
+
+				// Update progress after each batch
+				const progress = Math.round(batchEnd / totalRows * 100);
+				await updateJob(jobId, {
+					progress: progress,
+					processed_items: processedCount,
+					failed_items: skippedRows.length,
+					total_tokens: totalTokens,
+					total_cost: totalCost
+				}, { client });
+				
+				logger.debug(`Batch ${currentBatch} completed: ${batchTranslations.length} translated, ${batchSkipped.length} skipped`);
+				logger.debug(`Overall Progress: ${progress}% (${processedCount}/${totalRows} completed, ${skippedRows.length} skipped)`);
+
+			} catch (batchError) {
+				logger.error(`Error processing batch ${currentBatch}:`, batchError);
+				
+				// Mark entire batch as skipped if there's a batch-level error
+				batch.forEach((row, batchIndex) => {
+					skippedRows.push({
+						row_id: `row_${batchStart + batchIndex + 1}`,
+						row_number: batchStart + batchIndex + 1,
+						reason: `Batch processing error: ${batchError}`,
 						data: row
-					};
-					skippedRows.push(skipInfo);
-					continue;
-				}
-
-				completedRows.push(translationResult);
-				processedCount++;
-
-				// Update progress every 10 rows or on last row
-				if (processedCount % 10 === 0 || i === totalRows - 1) {
-					const progress = Math.round((i + 1) / totalRows * 100);
-					await updateJob(jobId, {
-						progress: progress,
-						processed_items: processedCount,
-						failed_items: skippedRows.length,
-						total_tokens: totalTokens,
-						total_cost: totalCost
-					}, { client });
-					console.log(`Progress: ${progress}% (${processedCount}/${totalRows} completed, ${skippedRows.length} skipped)`);
-				}
-
-			} catch (rowError) {
-				console.error(`Error processing row ${i + 1}:`, rowError);
-				const skipInfo = {
-					row_id: `row_${i + 1}`,
-					row_number: i + 1,
-					reason: `Processing error: ${rowError.message}`,
-					data: allRows[i]
-				};
-				skippedRows.push(skipInfo);
+					});
+				});
 			}
 		}
 
@@ -514,13 +597,13 @@ async function processJobInBackground(
 			failed_items: skippedRows.length,
 			total_tokens: totalTokens,
 			total_cost: totalCost,
-			skipped_rows: skippedRows.length > 0 ? skippedRows : null
+			skipped_rows: skippedRows.length > 0 ? skippedRows : undefined
 		}, { client });
 		
-		console.log(`Job ${jobId} completed successfully: ${processedCount} processed, ${skippedRows.length} skipped`);
+		logger.debug(`Job ${jobId} completed successfully: ${processedCount} processed, ${skippedRows.length} skipped`);
 		
 	} catch (error) {
-		console.error(`Error processing job ${jobId}:`, error);
+		logger.error(`Error processing job ${jobId}:`, error);
 		// Mark job as failed
 		try {
 			await updateJob(jobId, {
@@ -528,9 +611,9 @@ async function processJobInBackground(
 				completed_at: new Date().toISOString(),
 				error: error instanceof Error ? error.message : 'Unknown error during processing'
 			}, { client });
-			console.log(`Job ${jobId} marked as failed due to error`);
+			logger.debug(`Job ${jobId} marked as failed due to error`);
 		} catch (updateError) {
-			console.error(`Failed to update job ${jobId} status to failed:`, updateError);
+			logger.error(`Failed to update job ${jobId} status to failed:`, updateError);
 		}
 	}
 } 
