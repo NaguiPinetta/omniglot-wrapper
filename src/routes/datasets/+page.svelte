@@ -10,6 +10,7 @@
 	import type { DatasetFormData, DatasetPreview } from '../../types/datasets';
 	import type { PageData } from './$types';
 	import { logger } from '$lib/utils/logger';
+	import { formatFileSize } from '../../lib/utils';
 
 	export let data: PageData;
 
@@ -117,7 +118,7 @@
 
 	<!-- Upload Modal -->
 	{#if showModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click={() => showModal = false}>
+		<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showModal = false}>
 			<div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" on:click|stopPropagation>
 				<div class="flex justify-between items-center mb-4">
 					<h2 class="text-xl font-bold">Upload New Dataset</h2>
@@ -251,7 +252,7 @@
 							</div>
 							<div>
 								<p class="font-medium text-gray-500">Size</p>
-								<p>{(dataset.file_size / 1024).toFixed(2)} KB</p>
+								<p>{formatFileSize(dataset.file_size)}</p>
 							</div>
 							<div>
 								<p class="font-medium text-gray-500">Rows</p>

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "cross-env NODE_TLS_REJECT_UNAUTHORIZED=0 vite dev",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -13,6 +13,7 @@
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0-next.6",
     "autoprefixer": "^10.4.14",
+    "cross-env": "^7.0.3",
     "postcss": "^8.4.24",
     "postcss-load-config": "^4.0.1",
     "svelte": "^5.0.0-next.1",

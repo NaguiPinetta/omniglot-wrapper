@@ -7,28 +7,21 @@ import { XMLParser } from 'fast-xml-parser';
 
 // Helper function to get current user ID - use the authenticated client
 async function getCurrentUserId(client: SupabaseClient): Promise<string> {
-	console.log('Getting current user ID for dataset...');
-	
 	// Try to get user from session first
 	const { data: { session }, error: sessionError } = await client.auth.getSession();
-	console.log('Session check:', { session: !!session, user: session?.user?.email, error: sessionError });
 	
 	if (session?.user?.id) {
-		console.log('Found user ID from session:', session.user.id);
 		return session.user.id;
 	}
 	
 	// Fallback: try to get user directly
 	const { data: { user }, error: userError } = await client.auth.getUser();
-	console.log('User check:', { user: user?.email, error: userError });
 	
 	if (user?.id) {
-		console.log('Found user ID from getUser:', user.id);
 		return user.id;
 	}
 	
-	console.error('Authentication failed - no user found for dataset');
-	console.log('No user found, using anonymous ID');
+	// Use anonymous ID as fallback
 	return '00000000-0000-0000-0000-000000000000';
 }
 
@@ -37,7 +30,7 @@ async function getCurrentUserId(client: SupabaseClient): Promise<string> {
 export async function getDatasets({
 	client = supabase
 }: { client?: SupabaseClient } = {}): Promise<Dataset[]> {
-	const { data, error } = await client.from('datasets').select('id, name, file_url, row_count, columns, user_id, uploaded_at').order('uploaded_at', { ascending: false });
+	const { data, error } = await client.from('datasets').select('id, name, file_url, row_count, columns, user_id, uploaded_at, file_content').order('uploaded_at', { ascending: false });
 	if (error) throw error;
 	
 	// Map the database fields to match the expected Dataset interface
@@ -52,12 +45,15 @@ export async function getDatasets({
 			else fileType = 'csv';
 		}
 		
+		// Calculate file size from file_content length
+		const fileSize = row.file_content ? new Blob([row.file_content]).size : 0;
+		
 		return {
 		id: row.id,
 		name: row.name,
 		description: '', // Not in database, use empty string
 		file_name: row.file_url || '', // Use file_url as file_name
-		file_size: 0, // Not in database, use 0
+		file_size: fileSize, // Calculate from file_content
 			file_type: fileType,
 		row_count: row.row_count || 0,
 			columns: row.columns || [], // Use stored columns if available
@@ -87,12 +83,15 @@ export async function getDataset(
 		else fileType = 'csv';
 	}
 	
+	// Calculate file size from file_content length
+	const fileSize = data.file_content ? new Blob([data.file_content]).size : 0;
+	
 	return {
 		id: data.id,
 		name: data.name,
 		description: '', // Not in database, use empty string
 		file_name: data.file_url || '',
-		file_size: 0, // Not in database, use 0
+		file_size: fileSize, // Calculate from file_content
 		file_type: fileType,
 		row_count: data.row_count || 0,
 		columns: data.columns || [], // Use stored columns if available
@@ -329,7 +328,7 @@ export async function uploadAndCreateDataset(
       name: data.name,
       description: formData.description || '',
       file_name: file.name,
-      file_size: file.size,
+      file_size: 0, // Not in database, use 0
       file_type: getFileType(file.name),
       row_count: preview.totalRows,
       columns: preview.headers,

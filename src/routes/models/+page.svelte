@@ -202,7 +202,7 @@
 
 					<!-- API Key Modal -->
 					{#if showApiKeyDialog}
-						<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+						<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
 							<div class="bg-white rounded-lg p-6 w-full max-w-md mx-4">
 								<div class="flex justify-between items-center mb-4">
 									<h3 class="text-lg font-medium text-gray-900">Add API Key</h3>
@@ -376,7 +376,7 @@
 
 					<div class="flex justify-end">
 						<Button 
-							variant="outline" 
+							variant="secondary" 
 							size="sm" 
 							on:click={loadUsageStats}
 							disabled={loadingUsage}

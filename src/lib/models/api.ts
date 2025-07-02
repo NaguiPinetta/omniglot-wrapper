@@ -69,7 +69,6 @@ export async function getModel(
 export async function getApiKeys({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<ApiKey[]> {
 	// Get current user ID (authenticated or anonymous)
 	const userId = await getCurrentUserId(client);
-	console.log('getApiKeys - Using user ID:', userId);
 	
 	const { data, error } = await client
 		.from('api_keys')
@@ -84,12 +83,8 @@ export async function createApiKey(
 	apiKey: ApiKeyFormData,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<ApiKey> {
-	console.log('createApiKey called with:', apiKey);
-	console.log('Using client:', client ? 'provided' : 'default supabaseClient');
-	
 	// Get current user ID (authenticated or anonymous)
 	const userId = await getCurrentUserId(client);
-	console.log('createApiKey - Using user ID:', userId);
 	
 	const apiKeyWithUser = {
 		...apiKey,
@@ -98,10 +93,7 @@ export async function createApiKey(
 	
 	const { data, error } = await client.from('api_keys').insert([apiKeyWithUser]).select().single();
 	
-	console.log('Supabase response:', { data, error });
-	
 	if (error) {
-		console.error('Supabase error:', error);
 		throw error;
 	}
 
@@ -112,12 +104,9 @@ export async function createApiKey(
 			.eq('provider', data.provider);
 		if (updateError) {
 			console.error('Failed to auto-link models to new API key:', updateError);
-		} else {
-			console.log(`✅ All ${data.provider} models have been linked to your saved key.`);
 		}
 	}
 	
-	console.log('Returning data:', data);
 	return data;
 }
 

@@ -1,13 +1,23 @@
 import type { Handle } from '@sveltejs/kit';
-import { createServerSupabaseClient } from '$lib/server/supabase';
+import { createClient } from '@supabase/supabase-js';
 import { redirect } from '@sveltejs/kit';
+import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '$env/static/private';
 
 // Protected routes that require authentication
 const protectedRoutes = ['/agents', '/datasets', '/jobs', '/glossary', '/modules', '/models'];
 
 export const handle: Handle = async ({ event, resolve }) => {
-  // Create Supabase client for this request
-  const supabase = await createServerSupabaseClient(event);
+  // Create a simple Supabase client for authentication
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    throw new Error('Missing Supabase environment variables');
+  }
+  
+  const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
   
   // Try to get session from cookies first
   const accessToken = event.cookies.get('sb-access-token');

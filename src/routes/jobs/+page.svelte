@@ -361,20 +361,25 @@
 				throw new Error('Dataset not found in store');
 			}
 			
-					// Use the same API endpoint as the test function
-		const response = await fetch(`/api/datasets/${datasetId}/preview`);
-		if (!response.ok) {
-			throw new Error(`Failed to get dataset preview: ${response.status}`);
-		}
-		
-		const previewRows = await response.json();
-		previewLogger.debug('Dataset preview API result', { rowsCount: previewRows?.length });
-		
-		selectedDatasetPreview = previewRows || [];
-		availableColumns = Object.keys(previewRows[0] || {});
+			// Use the same API endpoint as the test function
+			const response = await fetch(`/api/datasets/${datasetId}/preview`);
+			if (!response.ok) {
+				throw new Error(`Failed to get dataset preview: ${response.status}`);
+			}
+			
+			const previewData = await response.json();
+			previewLogger.debug('Dataset preview API result', { previewData });
+			
+			// Handle the correct API response format: {headers, rows, rowCount, totalRows}
+			if (previewData.error) {
+				throw new Error(previewData.error);
+			}
+			
+			selectedDatasetPreview = previewData.rows || [];
+			availableColumns = previewData.headers || [];
 			
 			previewLogger.debug('Loaded dataset preview', { 
-				rowsCount: previewRows?.length, 
+				rowsCount: selectedDatasetPreview.length, 
 				columnsCount: availableColumns.length, 
 				fileType: selectedDataset?.file_type 
 			});
@@ -650,14 +655,23 @@
 				throw new Error(`Failed to get dataset preview: ${response.status}`);
 			}
 			
-			const preview = await response.json();
-			const columns = Object.keys(preview[0] || {});
+			const previewData = await response.json();
+			
+			// Handle the correct API response format: {headers, rows, rowCount, totalRows}
+			if (previewData.error) {
+				throw new Error(previewData.error);
+			}
+			
+			const columns = previewData.headers || [];
+			const rows = previewData.rows || [];
+			
 			testLogger.debug('Dataset preview successful', { 
-				previewRowsCount: preview.length, 
-				columnsCount: columns.length 
+				previewRowsCount: rows.length, 
+				columnsCount: columns.length,
+				totalRows: previewData.totalRows
 			});
 			
-			alert(`Dataset preview successful! Check console for details.\nColumns: ${columns.join(', ')}`);
+			alert(`Dataset preview successful! Check console for details.\nColumns: ${columns.join(', ')}\nRows: ${rows.length}/${previewData.totalRows}`);
 			
 		} catch (error: any) {
 			testLogger.error('Dataset preview test failed', error);
@@ -706,7 +720,7 @@
 
 	<!-- Create Job Modal -->
 	{#if showModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click={() => showModal = false}>
+		<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showModal = false}>
 			<div class="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto" on:click|stopPropagation>
 				<div class="flex justify-between items-center mb-4">
 					<h2 class="text-xl font-bold">Create New Job</h2>
@@ -1164,7 +1178,7 @@
 
 	<!-- Results Modal -->
 	{#if showResultsModal}
-		<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click={() => showResultsModal = false}>
+		<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" on:click={() => showResultsModal = false}>
 			<div class="bg-white rounded-lg p-6 max-w-6xl w-full mx-4 max-h-[90vh] overflow-y-auto" on:click|stopPropagation>
 				<div class="flex justify-between items-center mb-4">
 					<h2 class="text-xl font-bold">Translation Results: {selectedJobName}</h2>

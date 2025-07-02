@@ -1,31 +1,37 @@
-import { json, error } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getDatasetPreview } from '../../../../../lib/datasets/api';
+import { createServerSupabaseClient } from '$lib/server/supabase';
+import { getDatasetPreview } from '$lib/datasets/api';
 
-export const GET: RequestHandler = async ({ params }) => {
-  try {
-    const datasetId = params.id;
-    
-    if (!datasetId) {
-      throw error(400, 'Dataset ID is required');
-    }
-
-    console.log('=== DATASET PREVIEW API ENDPOINT ===');
-    console.log('Dataset ID:', datasetId);
-
-    const preview = await getDatasetPreview(datasetId);
-    
-    console.log('Preview result:', {
-      headers: preview.headers,
-      rowCount: preview.rows.length,
-      totalRows: preview.totalRows
-    });
-
-    // Return the preview rows (not the full preview object)
-    return json(preview.rows);
-    
-  } catch (err) {
-    console.error('Dataset preview API error:', err);
-    throw error(500, `Failed to get dataset preview: ${err instanceof Error ? err.message : 'Unknown error'}`);
-  }
+export const GET: RequestHandler = async (event) => {
+	try {
+		const { id: datasetId } = event.params;
+		
+		// Ensure we have a session before proceeding
+		if (!event.locals.session) {
+			return json({ error: 'Authentication required' }, { status: 401 });
+		}
+		
+		const client = await createServerSupabaseClient(event);
+		
+		// Add timeout to prevent hanging requests
+		const timeoutPromise = new Promise((_, reject) => {
+			setTimeout(() => reject(new Error('Request timeout')), 10000);
+		});
+		
+		const previewPromise = getDatasetPreview(datasetId, { client });
+		
+		const preview = await Promise.race([previewPromise, timeoutPromise]);
+		
+		return json({
+			headers: preview.headers,
+			rows: preview.rows,
+			rowCount: Math.min(preview.rows.length, 5),
+			totalRows: preview.totalRows
+		});
+	} catch (error) {
+		console.error('Dataset preview error:', error);
+		const errorMessage = error instanceof Error ? error.message : 'Failed to get dataset preview';
+		return json({ error: errorMessage }, { status: 500 });
+	}
 }; 

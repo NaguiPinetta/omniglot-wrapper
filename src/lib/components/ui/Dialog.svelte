@@ -22,13 +22,13 @@
 
 {#if open}
 	<div
-		class={cn('fixed inset-0 z-50 bg-background/80 backdrop-blur-sm', className)}
+		class={cn('fixed inset-0 z-50 bg-black/50 backdrop-blur-sm', className)}
 		on:click={handleBackdropClick}
 		on:keydown={handleKeydown}
 		tabindex="-1"
 		role="dialog"
 	>
-		<div class="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 sm:rounded-lg">
+		<div class="fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-white shadow-lg duration-200 sm:rounded-lg">
 			<slot />
 		</div>
 	</div>

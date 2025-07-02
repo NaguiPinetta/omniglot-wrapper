@@ -241,11 +241,10 @@
     <!-- Dialog Modal -->
     <Dialog bind:open={dialogOpen}>
       <DialogContent class="sm:max-w-[600px]">
-        <div class="bg-white text-black rounded-lg">
-            <DialogHeader>
-              <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
-            </DialogHeader>
-            <form on:submit|preventDefault={handleSubmit} class="space-y-4 pt-4 p-6">
+        <DialogHeader>
+          <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
+        </DialogHeader>
+        <form on:submit|preventDefault={handleSubmit} class="space-y-4 pt-4">
               <div>
                   <label for="agent-name" class="block text-sm font-medium mb-1">Name</label>
                   <input
@@ -284,7 +283,16 @@
               <!-- Model dropdown (only after provider is selected) -->
               {#if selectedProvider}
                 <div class="mb-4">
-                  <label for="agent-model" class="block text-sm font-medium mb-1">Model</label>
+                  <div class="flex justify-between items-center mb-1">
+                    <label for="agent-model" class="block text-sm font-medium">Model</label>
+                    <button 
+                      type="button"
+                      on:click={() => modelStore.loadModels()}
+                      class="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Refresh Models
+                    </button>
+                  </div>
                   <select
                     id="agent-model"
                     bind:value={formData.model_id}
@@ -294,8 +302,11 @@
                     <option value="">Select a model</option>
                     {#each filteredModels as model}
                       <option value={model.id}>{getModelDisplayName(model)}</option>
-                      {/each}
+                    {/each}
                   </select>
+                  <p class="text-xs text-gray-500 mt-1">
+                    Found {filteredModels.length} models for {selectedProvider}
+                  </p>
                   {#if apiKey}
                     <p class="text-xs text-gray-500 mt-1">API Key: {apiKey.key_value.slice(0, 4)}***{apiKey.key_value.slice(-4)}</p>
                   {/if}
@@ -352,7 +363,6 @@
                 </Button>
               </div>
             </form>
-        </div>
       </DialogContent>
     </Dialog>
 
