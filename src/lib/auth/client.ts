@@ -59,7 +59,7 @@ export async function initAuth() {
 
 // Ensure user profile exists in our users table
 async function ensureUserProfile(authUser: User) {
-  console.log('[Auth] Checking user profile for:', authUser.email, 'ID:', authUser.id);
+  console.log('[Auth] Checking user profile for:', authUser.email);
   
   const { data: existingUser, error: selectError } = await supabase
     .from('users')
@@ -90,13 +90,6 @@ async function ensureUserProfile(authUser: User) {
       console.error('[Auth] Error creating user profile:', insertError);
       console.error('[Auth] User ID:', authUser.id);
       console.error('[Auth] User Email:', authUser.email);
-      
-      // Try to understand the error better
-      if (insertError.code === '23505') {
-        console.log('[Auth] User profile already exists (race condition)');
-      } else if (insertError.code === '42501') {
-        console.log('[Auth] Permission denied - RLS policy issue');
-      }
     } else {
       console.log('[Auth] User profile created successfully:', newUser);
     }
