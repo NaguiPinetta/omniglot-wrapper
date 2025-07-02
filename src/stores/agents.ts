@@ -35,20 +35,21 @@ function createAgentStore() {
       }
     },
 
-		async addAgent(agentData: Omit<Agent, 'id' | 'created_at'>) {
-			update(state => ({ ...state, loading: true, error: null }));
-			try {
-				const newAgent = await createAgent(agentData);
-      update(state => ({
-        ...state,
-					agents: [newAgent, ...state.agents],
-					loading: false
-      }));
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : 'Failed to create agent';
-				update(state => ({ ...state, loading: false, error: errorMessage }));
-			}
-		},
+			async addAgent(agentData: Omit<Agent, 'id' | 'created_at'>) {
+		update(state => ({ ...state, loading: true, error: null }));
+		try {
+			const newAgent = await createAgent(agentData);
+    update(state => ({
+      ...state,
+				agents: [newAgent, ...state.agents],
+				loading: false
+    }));
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'Failed to create agent';
+			update(state => ({ ...state, loading: false, error: errorMessage }));
+			throw error; // Re-throw to handle in UI
+		}
+	},
 
 		async updateAgent(id: string, agentData: Partial<Agent>) {
 			update(state => ({ ...state, loading: true, error: null }));

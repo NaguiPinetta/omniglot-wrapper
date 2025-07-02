@@ -32,7 +32,20 @@ export async function createAgent(
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<Agent> {
 	logger.debug('Creating agent', { name: agent.custom_name, model: agent.model });
-	const { data, error } = await client.from('agents').insert([agent]).select().single();
+	
+	// Get current user ID
+	const { data: { session } } = await client.auth.getSession();
+	if (!session?.user?.id) {
+		throw new Error('User not authenticated');
+	}
+	
+	// Ensure user_id is set
+	const agentWithUserId = {
+		...agent,
+		user_id: session.user.id
+	};
+	
+	const { data, error } = await client.from('agents').insert([agentWithUserId]).select().single();
 	
 	if (error) {
 		logger.error('Failed to create agent', error);
@@ -65,23 +78,6 @@ export async function deleteAgent(
 	const { error } = await client.from('agents').delete().eq('id', id);
   if (error) throw error;
 }
-
-// Commented out since is_active field doesn't exist in database
-// export async function toggleAgentStatus(
-// 	id: string,
-// 	isActive: boolean,
-// 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
-// ): Promise<Agent> {
-// 	const { data, error } = await client
-// 		.from('agents')
-// 		.update({ is_active: isActive })
-// 		.eq('id', id)
-// 		.select()
-// 		.single();
-
-// 	if (error) throw error;
-// 	return data;
-// }
 
 export async function executeAgent(
 	agentId: string,
