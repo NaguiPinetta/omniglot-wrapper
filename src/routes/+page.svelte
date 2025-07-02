@@ -12,7 +12,7 @@
 		agentStore.loadAgents();
 		datasetStore.loadDatasets();
 		jobStore.loadJobs();
-		glossaryStore.loadGlossary();
+		glossaryStore.loadEntries();
 	});
 
 	function getStatusCount(jobs: any[], status: string) {
