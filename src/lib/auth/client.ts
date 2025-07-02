@@ -73,10 +73,13 @@ async function ensureUserProfile(authUser: User) {
 
 // Auth functions
 export async function signInWithMagicLink(email: string) {
+  // Use environment variable for redirect URL, fallback to current origin
+  const redirectUrl = env.PUBLIC_APP_URL || window.location.origin;
+  
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${window.location.origin}/auth/callback`
+      emailRedirectTo: `${redirectUrl}/auth/callback`
     }
   });
   
