@@ -34,6 +34,11 @@
           status = 'Authentication failed';
         } else if (data.session) {
           console.log('Session established successfully');
+          
+          // Manually set cookies for server-side access
+          document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax`;
+          document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+          
           status = 'Authentication successful! Redirecting...';
           
           // Wait a moment then redirect
@@ -50,6 +55,11 @@
         
         if (session) {
           console.log('Already authenticated, redirecting...');
+          
+          // Ensure cookies are set for existing session
+          document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=3600; SameSite=Lax`;
+          document.cookie = `sb-refresh-token=${session.refresh_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+          
           status = 'Already authenticated! Redirecting...';
           goto('/', { replaceState: true });
         } else {

@@ -23,15 +23,8 @@ export async function initAuth() {
   session.set(initialSession);
   user.set(initialSession?.user ?? null);
   
-  // If we have an initial session, ensure user profile
-  if (initialSession?.user) {
-    await ensureUserProfile(initialSession.user);
-  }
-  
   // Listen for auth changes
   supabase.auth.onAuthStateChange(async (event, currentSession) => {
-    console.log('[Auth] State change:', event, currentSession?.user?.email);
-    
     session.set(currentSession);
     user.set(currentSession?.user ?? null);
     
@@ -39,8 +32,6 @@ export async function initAuth() {
       // Set cookies for server-side access
       document.cookie = `sb-access-token=${currentSession.access_token}; path=/; max-age=3600; SameSite=Lax`;
       document.cookie = `sb-refresh-token=${currentSession.refresh_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
-      
-      console.log('[Auth] Cookies set for server-side access');
       
       // Ensure user profile exists
       if (currentSession.user) {
@@ -50,7 +41,6 @@ export async function initAuth() {
       // Clear cookies
       document.cookie = 'sb-access-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
       document.cookie = 'sb-refresh-token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT';
-      console.log('[Auth] Cookies cleared');
     }
   });
   
@@ -59,49 +49,25 @@ export async function initAuth() {
 
 // Ensure user profile exists in our users table
 async function ensureUserProfile(authUser: User) {
-  console.log('[Auth] Checking user profile for:', authUser.email, 'ID:', authUser.id);
-  
-  const { data: existingUser, error: selectError } = await supabase
+  const { data: existingUser } = await supabase
     .from('users')
-    .select('id, email, name')
+    .select('id')
     .eq('id', authUser.id)
     .single();
   
-  if (selectError && selectError.code !== 'PGRST116') {
-    console.error('[Auth] Error checking user profile:', selectError);
-    return;
-  }
-  
   if (!existingUser) {
-    console.log('[Auth] Creating user profile for:', authUser.email);
-    
     // Create user profile if it doesn't exist
-    const { data: newUser, error: insertError } = await supabase
+    const { error } = await supabase
       .from('users')
       .insert({
         id: authUser.id,
         email: authUser.email!,
         name: authUser.user_metadata?.name || authUser.email!.split('@')[0]
-      })
-      .select()
-      .single();
+      });
     
-    if (insertError) {
-      console.error('[Auth] Error creating user profile:', insertError);
-      console.error('[Auth] User ID:', authUser.id);
-      console.error('[Auth] User Email:', authUser.email);
-      
-      // Try to understand the error better
-      if (insertError.code === '23505') {
-        console.log('[Auth] User profile already exists (race condition)');
-      } else if (insertError.code === '42501') {
-        console.log('[Auth] Permission denied - RLS policy issue');
-      }
-    } else {
-      console.log('[Auth] User profile created successfully:', newUser);
+    if (error) {
+      console.error('Error creating user profile:', error);
     }
-  } else {
-    console.log('[Auth] User profile exists:', existingUser);
   }
 }
 
@@ -109,8 +75,6 @@ async function ensureUserProfile(authUser: User) {
 export async function signInWithMagicLink(email: string) {
   // Use environment variable for redirect URL, fallback to current origin
   const redirectUrl = env.PUBLIC_APP_URL || window.location.origin;
-  
-  console.log('[Auth] Sending magic link to:', email, 'redirect:', redirectUrl);
   
   const { error } = await supabase.auth.signInWithOtp({
     email,
@@ -120,22 +84,17 @@ export async function signInWithMagicLink(email: string) {
   });
   
   if (error) {
-    console.error('[Auth] Magic link error:', error);
     throw error;
   }
   
-  console.log('[Auth] Magic link sent successfully');
   return { success: true };
 }
 
 export async function signOut() {
-  console.log('[Auth] Signing out...');
   const { error } = await supabase.auth.signOut();
   if (error) {
-    console.error('[Auth] Sign out error:', error);
     throw error;
   }
-  console.log('[Auth] Signed out successfully');
 }
 
 // Get current user ID for API calls
@@ -147,4 +106,4 @@ export async function getCurrentUserId(): Promise<string | null> {
 // Check if user is authenticated
 export function isAuthenticated(): boolean {
   return getCurrentUserId() !== null;
-}
+} 

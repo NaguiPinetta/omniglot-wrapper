@@ -7,7 +7,7 @@ import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY } from '$env/static/private';
 const protectedRoutes = ['/agents', '/datasets', '/jobs', '/glossary', '/modules', '/models'];
 
 export const handle: Handle = async ({ event, resolve }) => {
-  // Create a simple Supabase clint for authentication
+  // Create a simple Supabase client for authentication
   if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
     throw new Error('Missing Supabase environment variables');
   }
@@ -25,16 +25,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   
   let session = null;
   
-  // Debug logging for authentication
-  const isProtectedRoute = protectedRoutes.some(route => 
-    event.url.pathname.startsWith(route)
-  );
-  
-  if (isProtectedRoute) {
-    console.log(`[Server Auth] Route: ${event.url.pathname}`);
-    console.log(`[Server Auth] Access token present: ${!!accessToken}`);
-    console.log(`[Server Auth] Refresh token present: ${!!refreshToken}`);
-  }
+  console.log(`[Auth] Route: ${event.url.pathname}, Cookies: access=${!!accessToken}, refresh=${!!refreshToken}`);
   
   if (accessToken && refreshToken) {
     // Set session from cookies
@@ -45,42 +36,30 @@ export const handle: Handle = async ({ event, resolve }) => {
     
     if (!error && data.session) {
       session = data.session;
-      if (isProtectedRoute) {
-        console.log(`[Server Auth] Session restored from cookies for user: ${session.user.email}`);
-      }
+      console.log(`[Auth] Session restored from cookies for user: ${session.user.email}`);
     } else {
-      if (isProtectedRoute) {
-        console.log(`[Server Auth] Failed to restore session from cookies:`, error?.message);
-      }
+      console.log(`[Auth] Failed to restore session from cookies:`, error?.message);
     }
   }
   
-  // Fallback to getSession if no cookies (shouldn't happen but just in case)
+  // Fallback to getSession if no cookies
   if (!session) {
     const { data: { session: fallbackSession } } = await supabase.auth.getSession();
-    if (fallbackSession) {
-      session = fallbackSession;
-      if (isProtectedRoute) {
-        console.log(`[Server Auth] Session found via getSession fallback for user: ${session.user.email}`);
-      }
-    } else {
-      if (isProtectedRoute) {
-        console.log(`[Server Auth] No session found via getSession fallback`);
-      }
-    }
+    session = fallbackSession;
   }
   
   // Add session to locals for use in pages
   event.locals.session = session;
   event.locals.user = session?.user ?? null;
   
-  if (isProtectedRoute && !session) {
-    console.log(`[Server Auth] Redirecting to login - protected route: ${event.url.pathname}, session: ${!!session}`);
-    throw redirect(303, `/login?next=${encodeURIComponent(event.url.pathname)}`);
-  }
+  // Check if route is protected and user is not authenticated
+  const isProtectedRoute = protectedRoutes.some(route => 
+    event.url.pathname.startsWith(route)
+  );
   
-  if (session && isProtectedRoute) {
-    console.log(`[Server Auth] Authenticated user ${session.user.email} accessing ${event.url.pathname}`);
+  if (isProtectedRoute && !session) {
+    console.log(`Redirecting to login - protected route: ${event.url.pathname}, session: ${!!session}`);
+    throw redirect(303, `/login?next=${encodeURIComponent(event.url.pathname)}`);
   }
   
 	return resolve(event);
