@@ -101,14 +101,23 @@ async function ensureUserProfile(authUser: User) {
 // Auth functions
 export async function signInWithMagicLink(email: string) {
   // Use environment variable for redirect URL, fallback to current origin
-  const redirectUrl = env.PUBLIC_APP_URL || window.location.origin;
+  let redirectUrl = env.PUBLIC_APP_URL || window.location.origin;
   
-  console.log('[Auth] Sending magic link to:', email, 'redirect:', redirectUrl);
+  // Force production URL if we detect we're in production
+  if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('omniglot-wrapper')) {
+    redirectUrl = 'https://omniglot-wrapper.vercel.app';
+  }
+  
+  const fullRedirectUrl = `${redirectUrl}/auth/callback`;
+  
+  console.log('[Auth] Sending magic link to:', email, 'redirect:', fullRedirectUrl);
+  console.log('[Auth] Current hostname:', window.location.hostname);
+  console.log('[Auth] PUBLIC_APP_URL:', env.PUBLIC_APP_URL);
   
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${redirectUrl}/auth/callback`
+      emailRedirectTo: fullRedirectUrl
     }
   });
   
@@ -117,7 +126,7 @@ export async function signInWithMagicLink(email: string) {
     throw error;
   }
   
-  console.log('[Auth] Magic link sent successfully');
+  console.log('[Auth] Magic link sent successfully to redirect:', fullRedirectUrl);
   return { success: true };
 }
 

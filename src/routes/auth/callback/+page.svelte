@@ -10,16 +10,43 @@
   
   onMount(async () => {
     try {
-      // Get the current URL parameters
+      // Debug: Log the full URL
+      const fullUrl = window.location.href;
+      console.log('[Auth Callback] Full URL:', fullUrl);
+      
+      // Get the current URL parameters and hash
       const urlParams = new URLSearchParams(window.location.search);
       const fragment = new URLSearchParams(window.location.hash.substring(1));
+      
+      // Debug: Log all parameters
+      console.log('[Auth Callback] URL params:', Object.fromEntries(urlParams));
+      console.log('[Auth Callback] Fragment params:', Object.fromEntries(fragment));
       
       // Check for auth tokens in URL or fragment
       const accessToken = urlParams.get('access_token') || fragment.get('access_token');
       const refreshToken = urlParams.get('refresh_token') || fragment.get('refresh_token');
       const tokenType = urlParams.get('token_type') || fragment.get('token_type');
+      const errorParam = urlParams.get('error') || fragment.get('error');
+      const errorDescription = urlParams.get('error_description') || fragment.get('error_description');
       
-      console.log('Callback page - tokens found:', { accessToken: !!accessToken, refreshToken: !!refreshToken, tokenType });
+      console.log('[Auth Callback] Tokens found:', { 
+        accessToken: !!accessToken, 
+        refreshToken: !!refreshToken, 
+        tokenType, 
+        error: errorParam,
+        errorDescription 
+      });
+      
+      // Check for auth errors first
+      if (errorParam) {
+        error = `Authentication error: ${errorParam}`;
+        if (errorDescription) {
+          error += ` - ${errorDescription}`;
+        }
+        status = 'Authentication failed';
+        console.error('[Auth Callback] Auth error from Supabase:', errorParam, errorDescription);
+        return;
+      }
       
       if (accessToken && refreshToken) {
         // Set the session using the tokens
@@ -36,8 +63,17 @@
           console.log('Session established successfully');
           
           // Manually set cookies for server-side access
-          document.cookie = `sb-access-token=${data.session.access_token}; path=/; max-age=3600; SameSite=Lax`;
-          document.cookie = `sb-refresh-token=${data.session.refresh_token}; path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax`;
+          const cookieOptions = `path=/; max-age=3600; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
+          const refreshCookieOptions = `path=/; max-age=${7 * 24 * 60 * 60}; SameSite=Lax${window.location.protocol === 'https:' ? '; Secure' : ''}`;
+          
+          document.cookie = `sb-access-token=${data.session.access_token}; ${cookieOptions}`;
+          document.cookie = `sb-refresh-token=${data.session.refresh_token}; ${refreshCookieOptions}`;
+          
+          console.log('[Auth Callback] Cookies set:', {
+            accessToken: `sb-access-token=${data.session.access_token.substring(0, 20)}...`,
+            refreshToken: `sb-refresh-token=${data.session.refresh_token.substring(0, 20)}...`,
+            options: cookieOptions
+          });
           
           status = 'Authentication successful! Redirecting...';
           
