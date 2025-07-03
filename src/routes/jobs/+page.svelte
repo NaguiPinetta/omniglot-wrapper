@@ -328,16 +328,27 @@
 	async function retryJob(jobId: string) {
 		const job = $jobStore.jobs.find(j => j.id === jobId);
 		if (job) {
-			// Reset the job to pending status and clear error
-			await jobStore.updateJob(jobId, {
-				status: 'pending',
-				error: null,
-				progress: 0,
-				processed_items: 0,
-				failed_items: 0,
-				started_at: null,
-				completed_at: null
-			});
+			try {
+				// Clear existing job results to ensure clean retry
+				const { clearJobResults } = await import('../../lib/jobs/api');
+				await clearJobResults(jobId);
+				
+				// Reset the job to pending status and clear error
+				await jobStore.updateJob(jobId, {
+					status: 'pending',
+					error: null,
+					progress: 0,
+					processed_items: 0,
+					failed_items: 0,
+					started_at: null,
+					completed_at: null
+				});
+				
+				logger.info(`Job ${jobId} successfully reset for retry`);
+			} catch (error: any) {
+				logger.error('Failed to retry job:', error);
+				alert(`Failed to retry job: ${error.message}`);
+			}
 		}
 	}
 
@@ -1108,7 +1119,7 @@
 							<p class="text-sm">{getAgentName(job.agent_id)}</p>
 							<p class="text-sm">{getDatasetName(job.dataset_id)}</p>
 						</div>
-						{#if job.status === 'running' || job.status === 'completed' || job.status === 'failed'}
+						{#if job.status === 'running' || job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'}
 							<div>
 								<p class="font-medium text-gray-500 text-sm">Progress</p>
 								<div class="w-full bg-gray-200 rounded-full h-2.5">
@@ -1161,7 +1172,7 @@
 									Download
 								</Button>
 							{/if}
-							{#if job.status === 'failed'}
+							{#if job.status === 'failed' || job.status === 'cancelled'}
 								<Button variant="secondary" size="sm" on:click={() => retryJob(job.id)}>
 									Retry
 								</Button>

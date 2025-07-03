@@ -14,6 +14,27 @@ import { fetchWithTimeout } from '$lib/utils/fetchWithTimeout';
 
 const logger = createApiLogger('JobsAPI');
 
+// Helper function to mark jobs as failed with clear error messages
+export async function markJobFailed(
+	jobId: string, 
+	errorMessage: string, 
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	logger.error(`Marking job ${jobId} as failed: ${errorMessage}`);
+	try {
+		await client
+			.from('jobs')
+			.update({
+				status: 'failed',
+				error: errorMessage,
+				completed_at: new Date().toISOString(),
+			})
+			.eq('id', jobId);
+	} catch (updateError) {
+		logger.error(`Failed to update job ${jobId} status to failed:`, updateError);
+	}
+}
+
 // Helper function to get current user ID
 async function getCurrentUserId(client: SupabaseClient): Promise<string> {
 	logger.debug('Getting current user ID...');
@@ -237,20 +258,49 @@ async function processJobInBackground(
 ) {
 	logger.debug(`Starting background processing for job ${jobId}`);
 	try {
-		let job = await getJob(jobId, { client });
-		logger.debug('Job retrieved for processing:', job);
+		// Defensive check: Get job with validation
+		let job;
+		try {
+			job = await getJob(jobId, { client });
+			logger.debug('Job retrieved for processing:', job);
+		} catch (error) {
+			logger.error(`Failed to retrieve job ${jobId}:`, error);
+			throw new Error(`Job ${jobId} not found or access denied`);
+		}
 		
-		const dataset = await getDataset(job.dataset_id, { client });
-		logger.debug('Dataset retrieved:', dataset);
+		// Defensive check: Get dataset with validation
+		let dataset;
+		try {
+			dataset = await getDataset(job.dataset_id, { client });
+			logger.debug('Dataset retrieved:', dataset);
+		} catch (error) {
+			logger.error(`Failed to retrieve dataset ${job.dataset_id}:`, error);
+			await markJobFailed(jobId, `Dataset ${job.dataset_id} not found or access denied`, { client });
+			return;
+		}
 		
-		// Get the agent and its prompt
+		// Defensive check: Get agent with validation
 		const { getAgent } = await import('../agents/api');
-		const agent = await getAgent(job.agent_id, { client });
-		logger.debug('Agent retrieved:', agent);
+		let agent;
+		try {
+			agent = await getAgent(job.agent_id, { client });
+			logger.debug('Agent retrieved:', agent);
+		} catch (error) {
+			logger.error(`Failed to retrieve agent ${job.agent_id}:`, error);
+			await markJobFailed(jobId, `Agent ${job.agent_id} not found or access denied`, { client });
+			return;
+		}
 		
-		// Get the model by agent.model_id
-		const model = await getModel(agent.model_id, { client });
-		logger.debug('Model retrieved:', model);
+		// Defensive check: Get model with validation
+		let model;
+		try {
+			model = await getModel(agent.model_id, { client });
+			logger.debug('Model retrieved:', model);
+		} catch (error) {
+			logger.error(`Failed to retrieve model ${agent.model_id}:`, error);
+			await markJobFailed(jobId, `Model ${agent.model_id} not found or access denied`, { client });
+			return;
+		}
 
 		// Get the API key by model.api_key_id
 		let apiKey = undefined;
@@ -494,6 +544,7 @@ async function processJobInBackground(
 			currentBatch++;
 			
 			logger.debug(`Processing batch ${currentBatch} (rows ${batchStart + 1}-${batchEnd})`);
+			logger.debug(`Starting batch ${currentBatch} processing...`);
 
 			try {
 				// Process batch with concurrency
@@ -603,18 +654,31 @@ async function processJobInBackground(
 		
 		logger.debug(`Job ${jobId} completed successfully: ${processedCount} processed, ${skippedRows.length} skipped`);
 		
-	} catch (error) {
-		logger.error(`Error processing job ${jobId}:`, error);
-		// Mark job as failed
-		try {
-			await updateJob(jobId, {
-				status: 'failed',
-				completed_at: new Date().toISOString(),
-				error: error instanceof Error ? error.message : 'Unknown error during processing'
-			}, { client });
-			logger.debug(`Job ${jobId} marked as failed due to error`);
-		} catch (updateError) {
-			logger.error(`Failed to update job ${jobId} status to failed:`, updateError);
-		}
+	} catch (error: any) {
+		logger.error(`Critical error processing job ${jobId}:`, error);
+		// Mark job as failed using the helper function
+		await markJobFailed(jobId, `Job processing failed: ${error.message}`, { client });
 	}
 } 
+export async function clearJobResults(
+	jobId: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	logger.debug(`Clearing existing results for job ${jobId}`);
+	try {
+		const { error } = await client
+			.from('translations')
+			.delete()
+			.eq('job_id', jobId);
+		
+		if (error) {
+			logger.error(`Failed to clear results for job ${jobId}:`, error);
+			throw error;
+		}
+		
+		logger.debug(`Successfully cleared results for job ${jobId}`);
+	} catch (error) {
+		logger.error(`Error clearing job results for ${jobId}:`, error);
+		throw error;
+	}
+}
