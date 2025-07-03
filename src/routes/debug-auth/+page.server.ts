@@ -49,19 +49,19 @@ export const load: PageServerLoad = async (event) => {
 		return {
 			debug: {
 				currentUser: user,
-				userError,
+				userError: userError ? (userError.message ?? String(userError)) : null,
 				userProfile,
-				profileError,
+				profileError: profileError ? (profileError.message ?? String(profileError)) : null,
 				jobsCount,
-				jobsError,
+				jobsError: jobsError ? (jobsError.message ?? String(jobsError)) : null,
 				agentsCount,
-				agentsError,
+				agentsError: agentsError ? (agentsError.message ?? String(agentsError)) : null,
 				datasetsCount,
-				datasetsError,
+				datasetsError: datasetsError ? (datasetsError.message ?? String(datasetsError)) : null,
 				allJobsSample,
-				allJobsError,
+				allJobsError: allJobsError ? (allJobsError.message ?? String(allJobsError)) : null,
 				allAgentsSample,
-				allAgentsError,
+				allAgentsError: allAgentsError ? (allAgentsError.message ?? String(allAgentsError)) : null,
 				sessionUserId: user?.id,
 				userEmail: user?.email
 			}
