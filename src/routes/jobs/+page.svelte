@@ -328,27 +328,16 @@
 	async function retryJob(jobId: string) {
 		const job = $jobStore.jobs.find(j => j.id === jobId);
 		if (job) {
-			try {
-				// Clear existing job results to ensure clean retry
-				const { clearJobResults } = await import('../../lib/jobs/api');
-				await clearJobResults(jobId);
-				
-				// Reset the job to pending status and clear error
-				await jobStore.updateJob(jobId, {
-					status: 'pending',
-					error: null,
-					progress: 0,
-					processed_items: 0,
-					failed_items: 0,
-					started_at: null,
-					completed_at: null
-				});
-				
-				logger.info(`Job ${jobId} successfully reset for retry`);
-			} catch (error: any) {
-				logger.error('Failed to retry job:', error);
-				alert(`Failed to retry job: ${error.message}`);
-			}
+			// Reset the job to pending status and clear error
+			await jobStore.updateJob(jobId, {
+				status: 'pending',
+				error: null,
+				progress: 0,
+				processed_items: 0,
+				failed_items: 0,
+				started_at: null,
+				completed_at: null
+			});
 		}
 	}
 
