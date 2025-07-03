@@ -200,13 +200,191 @@ export async function getJobResults(
 	jobId: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<JobResult[]> {
+	// Remove the arbitrary range limit and fetch all results
 	const { data, error } = await client.from('translations')
 		.select('*')
 		.eq('job_id', jobId)
-		.order('created_at', { ascending: true })
-		.range(0, 5999); // Fetch up to 6000 rows
+		.order('created_at', { ascending: true });
 	if (error) throw error;
 	return data ?? [];
+}
+
+// New function for paginated fetching of large job results
+export async function getJobResultsPaginated(
+	jobId: string,
+	{ client = supabaseClient, pageSize = 1000 }: { client?: SupabaseClient, pageSize?: number } = {}
+): Promise<JobResult[]> {
+	const paginatedLogger = logger.scope('PaginatedResults');
+	
+	paginatedLogger.debug(`Fetching paginated results for job ${jobId} with page size ${pageSize}`);
+	
+	// Get total count first - don't filter by status to get all translations
+	const { count: totalCount, error: countError } = await client
+		.from('translations')
+		.select('*', { count: 'exact', head: true })
+		.eq('job_id', jobId);
+
+	if (countError) {
+		paginatedLogger.error('Failed to count translations:', countError);
+		throw countError;
+	}
+
+	if (!totalCount || totalCount === 0) {
+		paginatedLogger.debug('No translations found for job', jobId);
+		return [];
+	}
+
+	paginatedLogger.debug(`Found ${totalCount} translations for job ${jobId}`);
+
+	// If total count is small, fetch all at once
+	if (totalCount <= pageSize) {
+		const { data, error } = await client
+			.from('translations')
+			.select('*')
+			.eq('job_id', jobId)
+			.order('created_at', { ascending: true });
+		
+		if (error) throw error;
+		return data ?? [];
+	}
+
+	// For large datasets, fetch in chunks
+	const allResults: JobResult[] = [];
+	const totalPages = Math.ceil(totalCount / pageSize);
+	
+	paginatedLogger.debug(`Fetching ${totalPages} pages of results for job ${jobId}`);
+
+	for (let page = 0; page < totalPages; page++) {
+		const offset = page * pageSize;
+		const limit = Math.min(pageSize, totalCount - offset);
+		
+		paginatedLogger.debug(`Fetching page ${page + 1}/${totalPages} (offset: ${offset}, limit: ${limit})`);
+		
+		const { data, error } = await client
+			.from('translations')
+			.select('*')
+			.eq('job_id', jobId)
+			.order('created_at', { ascending: true })
+			.range(offset, offset + limit - 1);
+
+		if (error) {
+			paginatedLogger.error(`Failed to fetch page ${page + 1}:`, error);
+			throw error;
+		}
+
+		if (data && data.length > 0) {
+			allResults.push(...data);
+			paginatedLogger.debug(`Added ${data.length} results from page ${page + 1}. Total so far: ${allResults.length}`);
+		}
+	}
+
+	paginatedLogger.debug(`Completed paginated fetch for job ${jobId}: ${allResults.length} total results`);
+	return allResults;
+}
+
+// Helper function to get complete job results for download
+export async function getCompleteJobResults(
+	jobId: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<JobResult[]> {
+	const downloadLogger = logger.scope('CompleteResults');
+	
+	try {
+		// First, try to get job info to check size
+		const { data: job, error: jobError } = await client
+			.from('jobs')
+			.select('processed_items, total_items')
+			.eq('id', jobId)
+			.single();
+
+		if (jobError) {
+			downloadLogger.warn('Could not fetch job info, using paginated fetch:', jobError);
+			return await getJobResultsPaginated(jobId, { client, pageSize: 1000 });
+		}
+
+		const processedItems = job.processed_items || 0;
+		downloadLogger.debug(`Job ${jobId} has ${processedItems} processed items`);
+
+		// Always use paginated fetch for jobs with more than 100 items to ensure we get all results
+		if (processedItems > 100) {
+			downloadLogger.debug(`Using paginated fetch for job ${jobId} with ${processedItems} items`);
+			return await getJobResultsPaginated(jobId, { client, pageSize: 1000 });
+		} else {
+			downloadLogger.debug(`Using standard fetch for small job ${jobId}`);
+			return await getJobResults(jobId, { client });
+		}
+	} catch (error) {
+		downloadLogger.error(`Error in getCompleteJobResults for job ${jobId}:`, error);
+		// Fallback to paginated fetch
+		downloadLogger.debug('Falling back to paginated fetch');
+		return await getJobResultsPaginated(jobId, { client, pageSize: 1000 });
+	}
+}
+
+// Diagnostic function to help debug translation issues
+export async function diagnoseJobResults(
+	jobId: string,
+	{ client = supabaseClient }: { client?: SupabaseClient } = {}
+): Promise<void> {
+	const diagLogger = logger.scope('JobDiagnostics');
+	
+	try {
+		// Get job info
+		const { data: job, error: jobError } = await client
+			.from('jobs')
+			.select('*')
+			.eq('id', jobId)
+			.single();
+
+		if (jobError) {
+			diagLogger.error('Failed to fetch job:', jobError);
+			return;
+		}
+
+		// Get translation counts by status
+		const { data: statusCounts, error: statusError } = await client
+			.from('translations')
+			.select('status')
+			.eq('job_id', jobId);
+
+		if (statusError) {
+			diagLogger.error('Failed to fetch translation statuses:', statusError);
+			return;
+		}
+
+		const statusBreakdown = statusCounts?.reduce((acc, t) => {
+			acc[t.status] = (acc[t.status] || 0) + 1;
+			return acc;
+		}, {} as Record<string, number>) || {};
+
+		// Get total count
+		const { count: totalCount } = await client
+			.from('translations')
+			.select('*', { count: 'exact', head: true })
+			.eq('job_id', jobId);
+
+		diagLogger.info(`Job ${jobId} diagnostics:`, {
+			jobStatus: job.status,
+			processedItems: job.processed_items,
+			failedItems: job.failed_items,
+			totalItems: job.total_items,
+			actualTranslationsCount: totalCount,
+			statusBreakdown,
+			discrepancy: job.processed_items - (totalCount || 0)
+		});
+
+		// Sample a few translations to check their content
+		const { data: sampleTranslations } = await client
+			.from('translations')
+			.select('id, row_id, status, source_text, target_text, created_at')
+			.eq('job_id', jobId)
+			.limit(5);
+
+		diagLogger.debug('Sample translations:', sampleTranslations);
+
+	} catch (error) {
+		diagLogger.error('Diagnostic failed:', error);
+	}
 }
 
 // --- Job Execution Logic ---
@@ -582,26 +760,53 @@ async function processJobInBackground(
 					}
 				});
 
-				// Batch database insert for successful translations
+				// Defensive database insert for successful translations
 				if (batchTranslations.length > 0) {
-					const { error: insertError } = await client
+					logger.debug(`Attempting to insert ${batchTranslations.length} translations for job ${jobId}`);
+					const { data: insertedData, error: insertError } = await client
 						.from('translations')
-						.insert(batchTranslations);
+						.insert(batchTranslations)
+						.select('id, row_id');
 
 					if (insertError) {
 						logger.error('Batch database insert failed:', insertError);
-						// Mark all translations in this batch as skipped
+						logger.error('Failed batch details:', {
+							jobId,
+							batchSize: batchTranslations.length,
+							batchStart,
+							batchEnd,
+							sampleTranslations: batchTranslations.slice(0, 3).map(t => ({
+								row_id: t.row_id,
+								source_text: t.source_text?.substring(0, 100) + '...',
+								target_text: t.target_text?.substring(0, 100) + '...'
+							}))
+						});
+						
+						// Mark all translations in this batch as failed
 						batchTranslations.forEach((translation, index) => {
 							batchSkipped.push({
 								row_id: translation.row_id,
 								row_number: batchStart + index + 1,
-								reason: `Database save failed: ${insertError.message}`,
-								data: batch[index]
+								reason: `Database insert failed: ${insertError.message}`,
+								data: {
+									source_text: translation.source_text?.substring(0, 200),
+									target_text: translation.target_text?.substring(0, 200),
+									...batch[index]
+								}
 							});
 						});
 					} else {
+						// Only increment processed_items if insert succeeded
+						const actualInsertedCount = insertedData?.length || batchTranslations.length;
 						completedRows.push(...batchTranslations);
-						processedCount += batchTranslations.length;
+						processedCount += actualInsertedCount;
+						
+						logger.debug(`Successfully inserted ${actualInsertedCount} translations for job ${jobId}`);
+						
+						// Verify all translations were inserted
+						if (actualInsertedCount !== batchTranslations.length) {
+							logger.warn(`Insert count mismatch for job ${jobId}: expected ${batchTranslations.length}, got ${actualInsertedCount}`);
+						}
 					}
 				}
 
@@ -638,6 +843,34 @@ async function processJobInBackground(
 					});
 				});
 			}
+		}
+
+		// Post-job logging: Compare actual inserted rows with processed_items count
+		logger.debug(`Performing post-job verification for job ${jobId}`);
+		try {
+			const { data: actualTranslations, error: countError } = await client
+				.from('translations')
+				.select('id', { count: 'exact' })
+				.eq('job_id', jobId);
+			
+			if (countError) {
+				logger.error(`Failed to count actual translations for job ${jobId}:`, countError);
+			} else {
+				const actualInsertedCount = actualTranslations?.length || 0;
+				logger.info(`Post-job verification for job ${jobId}:`, {
+					processed_items_count: processedCount,
+					actual_inserted_count: actualInsertedCount,
+					failed_items_count: skippedRows.length,
+					total_rows: totalRows,
+					discrepancy: processedCount - actualInsertedCount
+				});
+				
+				if (processedCount !== actualInsertedCount) {
+					logger.warn(`DISCREPANCY DETECTED for job ${jobId}: processed_items (${processedCount}) != actual_inserted_count (${actualInsertedCount}). Difference: ${processedCount - actualInsertedCount}`);
+				}
+			}
+		} catch (verificationError) {
+			logger.error(`Post-job verification failed for job ${jobId}:`, verificationError);
 		}
 
 		// Final job completion

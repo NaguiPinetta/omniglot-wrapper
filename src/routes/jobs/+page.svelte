@@ -174,18 +174,44 @@
 
 	async function viewResults(jobId: string) {
 		try {
-			// Import the getJobResults function
+			// For viewing results, we'll limit to a reasonable number for UI performance
+			// but use the paginated approach for large jobs
 			const { getJobResults } = await import('../../lib/jobs/api');
-			selectedJobResults = await getJobResults(jobId);
+			
+			// Check job size first
 			const job = $jobStore.jobs.find(j => j.id === jobId);
+			const processedItems = job?.processed_items || 0;
+			
+			logger.debug('Loading results for view modal:', { jobId, processedItems });
+			
+			// For large jobs, fetch a limited sample for the modal
+			if (processedItems > 1000) {
+				logger.debug('Large job detected, fetching limited sample for modal view');
+				selectedJobResults = await getJobResults(jobId); // This already limits to 6000 rows
+				
+				// Show a warning if we're displaying a subset
+				if (selectedJobResults.length >= 5999) {
+					logger.warn('Displaying limited results in modal for large job');
+				}
+			} else {
+				selectedJobResults = await getJobResults(jobId);
+			}
+			
 			selectedJobName = job?.name || 'Unknown Job';
 			
 			// Load skipped rows from job record (if any)
 			selectedJobSkippedRows = job?.skipped_rows || [];
 			
+			logger.debug('Results loaded for modal:', { 
+				jobId, 
+				resultsCount: selectedJobResults.length,
+				skippedCount: selectedJobSkippedRows.length 
+			});
+			
 			showResultsModal = true;
 		} catch (error: any) {
 			logger.error('Failed to load job results', error);
+			alert(`Failed to load results: ${error.message}`);
 		}
 	}
 
@@ -194,8 +220,14 @@
 		jobLogger.debug('Starting download for job', { jobId });
 		
 		try {
-			const { getJobResults } = await import('../../lib/jobs/api');
-			const results = await getJobResults(jobId);
+			// Run diagnostics first to understand the data situation
+			const { diagnoseJobResults, getCompleteJobResults } = await import('../../lib/jobs/api');
+			
+			jobLogger.debug('Running job diagnostics...');
+			await diagnoseJobResults(jobId);
+			
+			// Use the new paginated download function for large jobs
+			const results = await getCompleteJobResults(jobId);
 			jobLogger.debug('Job results fetched', { resultsCount: results.length });
 			
 			const job = $jobStore.jobs.find(j => j.id === jobId);
@@ -207,6 +239,43 @@
 				return;
 			}
 
+			// Log job size information for debugging
+			const processedItems = job.processed_items || 0;
+			const totalItems = job.total_items || 0;
+			jobLogger.info('Job download details:', {
+				jobId,
+				processedItems,
+				totalItems,
+				actualResultsCount: results.length,
+				jobStatus: job.status
+			});
+
+			// Check for potential data discrepancies and alert user
+			if (processedItems > 0 && results.length !== processedItems) {
+				const discrepancy = processedItems - results.length;
+				jobLogger.warn('Data discrepancy detected:', {
+					processedItems,
+					actualResultsCount: results.length,
+					difference: discrepancy
+				});
+				
+				// Alert user about the discrepancy
+				const userConfirm = confirm(
+					`Data discrepancy detected!\n\n` +
+					`Expected: ${processedItems} translations\n` +
+					`Found: ${results.length} translations\n` +
+					`Missing: ${discrepancy} translations\n\n` +
+					`This might indicate incomplete job processing or database issues.\n` +
+					`Do you want to continue with the download of available results?`
+				);
+				
+				if (!userConfirm) {
+					jobLogger.debug('User cancelled download due to discrepancy');
+					return;
+				}
+			}
+
+			// Continue with existing download logic...
 			if (dataset.file_type === 'xml') {
 				// Download the original XML content
 				const { XMLParser, XMLBuilder } = await import('fast-xml-parser');
@@ -327,23 +396,38 @@
 
 	async function retryJob(jobId: string) {
 		const job = $jobStore.jobs.find(j => j.id === jobId);
-		if (job) {
-			try {
-				// Reset the job to pending status and clear error
-				await jobStore.updateJob(jobId, {
-					status: 'pending',
-					error: null,
-					progress: 0,
-					processed_items: 0,
-					failed_items: 0,
-					started_at: null,
-					completed_at: null
-				});
-				logger.info(`Job ${jobId} successfully reset for retry`);
-			} catch (error: any) {
-				logger.error('Failed to retry job:', error);
-				alert(`Failed to retry job: ${error.message}`);
+		if (!job) {
+			logger.error('Job not found in store:', jobId);
+			alert('Job not found. Please refresh the page and try again.');
+			return;
+		}
+
+		try {
+			// Reset the job to pending status and clear error
+			await jobStore.updateJob(jobId, {
+				status: 'pending',
+				error: null,
+				progress: 0,
+				processed_items: 0,
+				failed_items: 0,
+				started_at: null,
+				completed_at: null
+			});
+			logger.info(`Job ${jobId} successfully reset for retry`);
+		} catch (error: any) {
+			logger.error('Failed to retry job:', error);
+			
+			// Provide more specific error messages
+			let errorMessage = 'Failed to retry job';
+			if (error.message?.includes('PGRST116')) {
+				errorMessage = 'Job not found or access denied. The job may have been deleted.';
+			} else if (error.message?.includes('JWT')) {
+				errorMessage = 'Authentication expired. Please log out and log back in.';
+			} else if (error.message) {
+				errorMessage = `Failed to retry job: ${error.message}`;
 			}
+			
+			alert(errorMessage);
 		}
 	}
 
@@ -842,7 +926,7 @@
 										<div>
 											<span class="text-sm font-medium">🔒 Enforce Strictly</span>
 											<p class="text-xs text-gray-500">Must use glossary terms exactly as defined. Fail if terms are not followed.</p>
-						</div>
+		</div>
 									</label>
 									<label class="flex items-center space-x-2 cursor-pointer">
 										<input
@@ -885,8 +969,8 @@
 											<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
 											</svg>
-						</div>
-						<div>
+				</div>
+				<div>
 											<p class="text-sm font-medium text-blue-800">XML Translation Setup</p>
 											<p class="text-sm text-blue-700 mt-1">
 												XML files use a key/value structure. Each XML entry will be translated automatically:
@@ -896,9 +980,9 @@
 												<li>• <strong>Value:</strong> Text to be translated</li>
 												<li>• <strong>Output:</strong> Translated value with original key preserved</li>
 											</ul>
-						</div>
-					</div>
-					</div>
+				</div>
+			</div>
+			</div>
 
 								<!-- XML Dataset Preview -->
 								<div class="mt-4">
