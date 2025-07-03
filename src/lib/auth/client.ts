@@ -103,8 +103,12 @@ export async function signInWithMagicLink(email: string) {
   // Use environment variable for redirect URL, fallback to current origin
   let redirectUrl = env.PUBLIC_APP_URL || window.location.origin;
   
-  // Force production URL if we detect we're in production
-  if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('omniglot-wrapper')) {
+  // For local development, always use localhost
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    redirectUrl = window.location.origin; // This will be http://localhost:5174
+  }
+  // For production, force the production URL
+  else if (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('omniglot-wrapper')) {
     redirectUrl = 'https://omniglot-wrapper.vercel.app';
   }
   
@@ -112,6 +116,7 @@ export async function signInWithMagicLink(email: string) {
   
   console.log('[Auth] Sending magic link to:', email, 'redirect:', fullRedirectUrl);
   console.log('[Auth] Current hostname:', window.location.hostname);
+  console.log('[Auth] Current origin:', window.location.origin);
   console.log('[Auth] PUBLIC_APP_URL:', env.PUBLIC_APP_URL);
   
   const { error } = await supabase.auth.signInWithOtp({
