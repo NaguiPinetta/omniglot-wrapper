@@ -10,6 +10,7 @@ import type { Dataset } from '../../types/datasets';
 import type { ColumnMapping } from '../../types/jobs';
 import pLimit from 'p-limit';
 import { createApiLogger } from '../utils/logger';
+import { fetchWithTimeout } from '$lib/utils/fetchWithTimeout';
 
 const logger = createApiLogger('JobsAPI');
 
@@ -440,7 +441,7 @@ async function processJobInBackground(
 
 			// Translation with retry logic
 			const targetText = await retryWithBackoff(async () => {
-				const response = await fetch('/api/chat', {
+				const response = await fetchWithTimeout('/api/chat', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json'
@@ -451,7 +452,7 @@ async function processJobInBackground(
 						api_key: apiKey,
 						glossary: glossaryEntries
 					})
-				});
+				}, 30000); // 30s timeout
 
 				if (!response.ok) {
 					const errorText = await response.text();
