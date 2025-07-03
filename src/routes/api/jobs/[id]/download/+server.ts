@@ -1,9 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { supabaseClient } from '$lib/server/supabase';
+import { createServerSupabaseClient } from '$lib/server/supabase';
 import { logger } from '$lib/utils/logger';
 
-export const GET: RequestHandler = async ({ params, url, request }) => {
+export const GET: RequestHandler = async (event) => {
+	const { params, url, request } = event;
 	const jobId = params.id;
 	const page = parseInt(url.searchParams.get('page') || '1');
 	const limit = parseInt(url.searchParams.get('limit') || '1000');
@@ -26,8 +27,11 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 		const downloadLogger = logger.scope('JobDownload');
 		downloadLogger.debug('Paginated download request:', { jobId, page, limit, format });
 
+		// Create supabase client
+		const supabase = await createServerSupabaseClient(event);
+
 		// Get job details first
-		const { data: job, error: jobError } = await supabaseClient
+		const { data: job, error: jobError } = await supabase
 			.from('jobs')
 			.select('id, name, status, processed_items, failed_items, dataset_id')
 			.eq('id', jobId)
@@ -39,7 +43,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 		}
 
 		// Get dataset to determine file type
-		const { data: dataset, error: datasetError } = await supabaseClient
+		const { data: dataset, error: datasetError } = await supabase
 			.from('datasets')
 			.select('file_type, file_name')
 			.eq('id', job.dataset_id)
@@ -54,7 +58,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 		const offset = (page - 1) * limit;
 		
 		// Get total count first
-		const { count: totalCount, error: countError } = await supabaseClient
+		const { count: totalCount, error: countError } = await supabase
 			.from('translations')
 			.select('*', { count: 'exact', head: true })
 			.eq('job_id', jobId)
@@ -66,7 +70,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 		}
 
 		// Get paginated results
-		const { data: translations, error: translationsError } = await supabaseClient
+		const { data: translations, error: translationsError } = await supabase
 			.from('translations')
 			.select('*')
 			.eq('job_id', jobId)
@@ -127,7 +131,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 			}
 
 			// Create CSV data with proper headers
-			const csvData = translations.map(result => ({
+			const csvData = translations.map((result: any) => ({
 				'Row ID': result.row_id || '',
 				'Source Text': result.source_text || '',
 				'Target Text': result.target_text || '',
@@ -159,7 +163,7 @@ export const GET: RequestHandler = async ({ params, url, request }) => {
 			}
 
 			// Build XML content
-			const xmlEntries = translations.map(result => {
+			const xmlEntries = translations.map((result: any) => {
 				const rowId = result.row_id || '';
 				const targetText = result.target_text || '';
 				return `    <ResourceEntry ID="${rowId}" Value="${targetText.replace(/"/g, '&quot;')}" />`;
