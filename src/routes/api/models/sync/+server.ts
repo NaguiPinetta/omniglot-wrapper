@@ -133,7 +133,7 @@ export const POST: RequestHandler = async ({ request }) => {
 								output_cost_per_token: null,
 								is_active: true,
 								free_tier_limit: null,
-								access_type: 'api_key',
+								access_type: 'api',
 								api_key_id: openaiApiKey.id
 							});
 
@@ -255,7 +255,7 @@ export const POST: RequestHandler = async ({ request }) => {
 								output_cost_per_token: null,
 								is_active: true,
 								free_tier_limit: null,
-								access_type: 'api_key',
+								access_type: 'api',
 								api_key_id: geminiApiKey.id
 							});
 						if (insertError) {
