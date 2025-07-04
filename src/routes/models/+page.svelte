@@ -18,13 +18,15 @@
 	let selectedProvider = '';
 	let apiKeyForm: ApiKeyFormData = {
 		provider: '',
-		key_value: ''
+		key_value: '',
+		name: ''
 	};
 
 	const providers = [
 		{ value: 'openai', label: 'OpenAI' },
 		{ value: 'deepseek', label: 'DeepSeek' },
 		{ value: 'mistral', label: 'Mistral' },
+		{ value: 'gemini', label: 'Gemini' },
 		{ value: 'custom', label: 'Custom' }
 	];
 
@@ -117,7 +119,7 @@
 		
 		if (!$modelStore.error) {
 			apiKeyLogger.info('API key added successfully');
-			apiKeyForm = { provider: '', key_value: '' };
+			apiKeyForm = { provider: '', key_value: '', name: '' };
 			showApiKeyDialog = false;
 		} else {
 			apiKeyLogger.error('API key addition failed', { error: $modelStore.error });
@@ -189,7 +191,7 @@
 						<button 
 							class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md border border-transparent shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
 							on:click={() => {
-								apiKeyForm = { provider: '', key_value: '' };
+								apiKeyForm = { provider: '', key_value: '', name: '' };
 								showApiKeyDialog = true;
 							}}
 						>
@@ -228,6 +230,18 @@
 										</div>
 									{/if}
 									<div>
+										<label for="api-key-name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+										<input
+											id="api-key-name"
+											type="text"
+											placeholder="e.g., 'Main OpenAI Key'"
+											bind:value={apiKeyForm.name}
+											required
+											minlength="1"
+											class="w-full h-10 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+										/>
+									</div>
+									<div>
 										<label for="provider" class="block text-sm font-medium text-gray-700 mb-1">Provider</label>
 										<select
 											id="provider"
@@ -263,7 +277,7 @@
 										<button 
 											type="submit"
 											on:click={handleAddApiKey}
-											disabled={$modelStore.loading || !apiKeyForm.provider || !apiKeyForm.key_value}
+											disabled={$modelStore.loading || !apiKeyForm.provider || !apiKeyForm.key_value || !apiKeyForm.name}
 											class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
 										>
 											{$modelStore.loading ? 'Saving...' : 'Save Key'}
@@ -289,6 +303,7 @@
 							<Table>
 								<TableHeader>
 									<TableRow>
+										<TableHead>Name</TableHead>
 										<TableHead>Provider</TableHead>
 										<TableHead>Key</TableHead>
 										<TableHead>Created</TableHead>
@@ -298,6 +313,9 @@
 								<TableBody>
 									{#each $modelStore.apiKeys as apiKey (apiKey.id)}
 										<TableRow>
+											<TableCell class="font-medium">
+												{apiKey.name}
+											</TableCell>
 											<TableCell class="font-medium">
 												{getProviderLabel(apiKey.provider)}
 											</TableCell>

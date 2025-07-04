@@ -5,11 +5,13 @@ export interface ApiKey {
 	is_active: boolean;
 	created_at: string;
 	updated_at: string;
+	name: string;
 }
 
 export interface ApiKeyFormData {
 	provider: string;
 	key_value: string;
+	name: string;
 }
 
 export type ModelAccessType = 'api_key' | 'gateway' | 'free' | 'demo';

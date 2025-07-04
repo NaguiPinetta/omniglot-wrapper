@@ -29,29 +29,28 @@
     { value: 'openai', label: 'OpenAI' },
     { value: 'deepseek', label: 'DeepSeek' },
     { value: 'mistral', label: 'Mistral' },
+    { value: 'gemini', label: 'Gemini' },
     { value: 'custom', label: 'Custom' }
   ];
 
-  // Add provider selection logic
-  let selectedProvider = '';
-  $: availableProviders = $modelStore.apiKeys
-    .map(k => k.provider)
-    .filter((v, i, arr) => arr.indexOf(v) === i);
-  $: availableApiKeyIds = $modelStore.apiKeys
-    .filter(k => k.provider === selectedProvider)
-    .map(k => k.id);
-  $: filteredModels = $modelStore.models.filter(
-    m => m.provider === selectedProvider && m.api_key_id && availableApiKeyIds.includes(m.api_key_id)
-  );
+  // Provider-key dropdown options
+  $: providerKeyOptions = $modelStore.apiKeys.map(k => ({
+    provider: k.provider,
+    keyId: k.id,
+    name: k.name,
+    label: `${k.provider.charAt(0).toUpperCase() + k.provider.slice(1)} – ${k.name}`
+  }));
 
-  // Debug logging for model filtering
-  $: if (selectedProvider) {
-    console.log('Debug - Selected provider:', selectedProvider);
-    console.log('Debug - Available API key IDs:', availableApiKeyIds);
-    console.log('Debug - All models:', $modelStore.models);
-    console.log('Debug - Models for provider:', $modelStore.models.filter(m => m.provider === selectedProvider));
-    console.log('Debug - Filtered models:', filteredModels);
-  }
+  // Store selected provider-key id
+  let selectedProviderKeyId = '';
+
+  // Find the selected provider-key object
+  $: selectedProviderKey = providerKeyOptions.find(opt => opt.keyId === selectedProviderKeyId) || null;
+
+  // Filter models by selected provider and key
+  $: filteredModels = selectedProviderKey
+    ? $modelStore.models.filter(m => m.provider === selectedProviderKey.provider && m.api_key_id === selectedProviderKey.keyId)
+    : [];
 
   let availableModels: Model[] = [];
   let loadingModels = false;
@@ -198,9 +197,9 @@
   function getModelDisplayName(model: any) {
     const provider = model.provider.toUpperCase();
     const tokens = model.context_length ? ` - ${model.context_length.toLocaleString()} tokens` : '';
-    
-    // Simplified display for now
-    return `${model.name} (${provider})${tokens}`;
+    const apiKey = $modelStore.apiKeys.find(k => k.id === model.api_key_id);
+    const apiKeyLabel = apiKey ? ` [${apiKey.name}]` : '';
+    return `${model.name} (${provider})${tokens}${apiKeyLabel}`;
   }
 
   // New reactive variables
@@ -271,17 +270,17 @@
               </div>
 
               <div class="mb-4">
-                <label for="agent-provider" class="block text-sm font-medium mb-1">Provider</label>
-                <select id="agent-provider" bind:value={selectedProvider} class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm" required>
-                  <option value="">Select a provider</option>
-                  {#each availableProviders as provider}
-                    <option value={provider}>{provider.charAt(0).toUpperCase() + provider.slice(1)}</option>
+                <label for="agent-provider" class="block text-sm font-medium mb-1">Provider & API Key</label>
+                <select id="agent-provider" bind:value={selectedProviderKeyId} class="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm" required>
+                  <option value="">Select a provider & key</option>
+                  {#each providerKeyOptions as option}
+                    <option value={option.keyId}>{option.label}</option>
                   {/each}
                 </select>
               </div>
 
-              <!-- Model dropdown (only after provider is selected) -->
-              {#if selectedProvider}
+              <!-- Model dropdown (only after provider-key is selected) -->
+              {#if selectedProviderKey}
                 <div class="mb-4">
                   <div class="flex justify-between items-center mb-1">
                     <label for="agent-model" class="block text-sm font-medium">Model</label>
@@ -305,10 +304,10 @@
                     {/each}
                   </select>
                   <p class="text-xs text-gray-500 mt-1">
-                    Found {filteredModels.length} models for {selectedProvider}
+                    Found {filteredModels.length} models for {selectedProviderKey.label}
                   </p>
-                  {#if apiKey}
-                    <p class="text-xs text-gray-500 mt-1">API Key: {apiKey.key_value.slice(0, 4)}***{apiKey.key_value.slice(-4)}</p>
+                  {#if selectedProviderKey}
+                    <p class="text-xs text-gray-500 mt-1">API Key: {selectedProviderKey.name}</p>
                   {/if}
                 </div>
               {/if}

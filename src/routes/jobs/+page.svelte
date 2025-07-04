@@ -547,39 +547,39 @@
 				columnMapping.source_language_column = '';
 			} else {
 				// For CSV, use intelligent column matching
-				const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
-				const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
-				const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
-				
-				// Find the best match for source text column
-				for (const possible of possibleTextColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.source_text_column = match;
-						break;
-					}
+			const possibleTextColumns = ['text', 'content', 'source_text', 'source', 'message', 'description', 'body'];
+			const possibleIdColumns = ['id', 'row_id', 'index', 'number', 'key'];
+			const possibleLanguageColumns = ['language', 'lang', 'source_language', 'source_lang', 'locale'];
+			
+			// Find the best match for source text column
+			for (const possible of possibleTextColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.source_text_column = match;
+					break;
 				}
-				
-				// If no match found, use the first column as default
-				if (!columnMapping.source_text_column && availableColumns.length > 0) {
-					columnMapping.source_text_column = availableColumns[0];
+			}
+			
+			// If no match found, use the first column as default
+			if (!columnMapping.source_text_column && availableColumns.length > 0) {
+				columnMapping.source_text_column = availableColumns[0];
+			}
+			
+			// Find the best match for row ID column
+			for (const possible of possibleIdColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.row_id_column = match;
+					break;
 				}
-				
-				// Find the best match for row ID column
-				for (const possible of possibleIdColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.row_id_column = match;
-						break;
-					}
-				}
-				
-				// Find the best match for language column
-				for (const possible of possibleLanguageColumns) {
-					const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
-					if (match) {
-						columnMapping.source_language_column = match;
-						break;
+			}
+			
+			// Find the best match for language column
+			for (const possible of possibleLanguageColumns) {
+				const match = availableColumns.find(col => col.toLowerCase().includes(possible.toLowerCase()));
+				if (match) {
+					columnMapping.source_language_column = match;
+					break;
 					}
 				}
 			}
@@ -679,39 +679,39 @@
 		const testLogger = logger.scope('JobCreationTest');
 		
 		try {
-			// Test with minimal data
-			const testJobData = {
+		// Test with minimal data
+		const testJobData = {
 				name: 'DIAGNOSTIC TEST ' + new Date().toISOString(),
 				description: 'Test job for debugging',
 				agent_id: $agentStore.agents[0]?.id || '',
 				dataset_id: $datasetStore.datasets[0]?.id || '',
 				glossary_id: '',
 				glossary_usage_mode: 'prefer' as const,
-				source_language: 'en',
-				target_language: 'es',
+			source_language: 'en',
+			target_language: 'es',
 				translation_instructions: '',
-				column_mapping: {
-					source_text_column: 'text',
-					source_language_column: '',
-					row_id_column: ''
-				}
-			};
-			
+			column_mapping: {
+				source_text_column: 'text',
+				source_language_column: '',
+				row_id_column: ''
+			}
+		};
+		
 			testLogger.debug('Test job data prepared', { 
 				hasAgent: !!testJobData.agent_id, 
 				hasDataset: !!testJobData.dataset_id 
 			});
-			
-			if (!testJobData.agent_id) {
+		
+		if (!testJobData.agent_id) {
 				alert('No agents available for testing');
-				return;
-			}
-			
-			if (!testJobData.dataset_id) {
+			return;
+		}
+		
+		if (!testJobData.dataset_id) {
 				alert('No datasets available for testing');
-				return;
-			}
-			
+			return;
+		}
+		
 			await jobStore.addJob(testJobData);
 			testLogger.info('Test job creation completed successfully');
 			
@@ -798,7 +798,7 @@
 
 <main class="container mx-auto px-4 py-8">
 	<div class="flex justify-between items-center mb-6">
-		<h1 class="text-2xl font-bold">Translation Jobs</h1>
+			<h1 class="text-2xl font-bold">Translation Jobs</h1>
 		<div class="flex gap-2">
 			<Button variant="secondary" on:click={testDownload}>Test Download</Button>
 			<Button variant="secondary" on:click={testDatasetPreview}>Test Dataset Preview</Button>
@@ -926,7 +926,7 @@
 										<div>
 											<span class="text-sm font-medium">🔒 Enforce Strictly</span>
 											<p class="text-xs text-gray-500">Must use glossary terms exactly as defined. Fail if terms are not followed.</p>
-		</div>
+						</div>
 									</label>
 									<label class="flex items-center space-x-2 cursor-pointer">
 										<input

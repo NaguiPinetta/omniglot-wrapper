@@ -67,13 +67,10 @@ export async function getModel(
 
 // API Keys API
 export async function getApiKeys({ client = supabaseClient }: { client?: SupabaseClient } = {}): Promise<ApiKey[]> {
-	// Get current user ID (authenticated or anonymous)
-	const userId = await getCurrentUserId(client);
-	
+	// Get all API keys for all users (global read)
 	const { data, error } = await client
 		.from('api_keys')
 		.select('*')
-		.eq('user_id', userId)
 		.order('provider, created_at');
 	if (error) throw error;
 	return data ?? [];
@@ -132,16 +129,11 @@ export async function getApiKeyByProvider(
 	provider: string,
 	{ client = supabaseClient }: { client?: SupabaseClient } = {}
 ): Promise<ApiKey | null> {
-	// Get current user ID (authenticated or anonymous)
-	const userId = await getCurrentUserId(client);
-	
 	const { data, error } = await client
 		.from('api_keys')
 		.select('*')
 		.eq('provider', provider)
-		.eq('user_id', userId)
 		.single();
-	
 	if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "not found"
 	return data;
 }

@@ -634,7 +634,7 @@ async function processJobInBackground(
 				sourceLang = columnMapping.source_language_column ? row[columnMapping.source_language_column] : (job.source_language || 'en');
 			}
 
-			if (!sourceText || sourceText.trim() === '') {
+				if (!sourceText || sourceText.trim() === '') {
 				return {
 					type: 'skip',
 					skipInfo: {
@@ -819,14 +819,14 @@ async function processJobInBackground(
 
 				// Update progress after each batch
 				const progress = Math.round(batchEnd / totalRows * 100);
-				await updateJob(jobId, {
+				await updateJob(jobId, { 
 					progress: progress,
-					processed_items: processedCount,
+					processed_items: processedCount, 
 					failed_items: skippedRows.length,
 					total_tokens: totalTokens,
 					total_cost: totalCost
 				}, { client });
-				
+
 				logger.debug(`Batch ${currentBatch} completed: ${batchTranslations.length} translated, ${batchSkipped.length} skipped`);
 				logger.debug(`Overall Progress: ${progress}% (${processedCount}/${totalRows} completed, ${skippedRows.length} skipped)`);
 
@@ -835,7 +835,7 @@ async function processJobInBackground(
 				
 				// Mark entire batch as skipped if there's a batch-level error
 				batch.forEach((row, batchIndex) => {
-					skippedRows.push({
+				skippedRows.push({
 						row_id: `row_${batchStart + batchIndex + 1}`,
 						row_number: batchStart + batchIndex + 1,
 						reason: `Batch processing error: ${batchError}`,

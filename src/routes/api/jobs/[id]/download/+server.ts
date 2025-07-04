@@ -30,10 +30,10 @@ export const GET: RequestHandler = async (event) => {
 		// Create supabase client
 		const supabase = await createServerSupabaseClient(event);
 
-		// Get job details first
+		// Get job details first, including column_mapping and target_language
 		const { data: job, error: jobError } = await supabase
 			.from('jobs')
-			.select('id, name, status, processed_items, failed_items, dataset_id')
+			.select('id, name, status, processed_items, failed_items, dataset_id, target_language, column_mapping')
 			.eq('id', jobId)
 			.single();
 
@@ -69,14 +69,29 @@ export const GET: RequestHandler = async (event) => {
 			return json({ error: 'Failed to count translations' }, { status: 500 });
 		}
 
-		// Get paginated results
-		const { data: translations, error: translationsError } = await supabase
-			.from('translations')
-			.select('*')
-			.eq('job_id', jobId)
-			.eq('status', 'completed')
-			.order('created_at', { ascending: true })
-			.range(offset, offset + limit - 1);
+		// Get translations: paginated for JSON/XML, ALL for CSV
+		let translations, translationsError;
+		if (format === 'csv') {
+			const result = await supabase
+				.from('translations')
+				.select('*')
+				.eq('job_id', jobId)
+				.eq('status', 'completed')
+				.order('created_at', { ascending: true })
+				.limit(10000); // adjust as needed for your max expected job size
+			translations = result.data;
+			translationsError = result.error;
+		} else {
+			const result = await supabase
+				.from('translations')
+				.select('*')
+				.eq('job_id', jobId)
+				.eq('status', 'completed')
+				.order('created_at', { ascending: true })
+				.range(offset, offset + limit - 1);
+			translations = result.data;
+			translationsError = result.error;
+		}
 
 		if (translationsError) {
 			downloadLogger.error('Failed to fetch translations:', translationsError);
@@ -125,33 +140,69 @@ export const GET: RequestHandler = async (event) => {
 		// Return CSV format for direct download
 		if (format === 'csv') {
 			const Papa = (await import('papaparse')).default;
-			
-			if (!translations || translations.length === 0) {
-				return json({ error: 'No translations found' }, { status: 404 });
+
+			// Fetch the full dataset row content (CSV) for this dataset
+			const { data: datasetFull, error: datasetFullError } = await supabase
+				.from('datasets')
+				.select('file_content, columns')
+				.eq('id', job.dataset_id)
+				.single();
+
+			if (datasetFullError || !datasetFull?.file_content) {
+				logger.error('CSV Download: Failed to fetch original dataset content', { datasetFullError });
+				return json({ error: 'Failed to fetch original dataset content' }, { status: 500 });
 			}
 
-			// Create CSV data with proper headers
-			const csvData = translations.map((result: any) => ({
-				'Row ID': result.row_id || '',
-				'Source Text': result.source_text || '',
-				'Target Text': result.target_text || '',
-				'Source Language': result.source_language || '',
-				'Target Language': result.target_language || '',
-				'Confidence': result.confidence ? (result.confidence * 100).toFixed(1) + '%' : '95.0%',
-				'Status': result.status || 'completed',
-				'Created At': result.created_at ? new Date(result.created_at).toLocaleString() : ''
-			}));
+			// Parse the original CSV rows
+			const parsed = Papa.parse(datasetFull.file_content, { header: true });
+			const originalRows: Record<string, any>[] = parsed.data.filter((row: any) => Object.values(row).some(v => v !== null && v !== undefined && String(v).trim() !== ''));
+			const originalHeaders: string[] = parsed.meta.fields || datasetFull.columns || [];
 
-			const csvContent = Papa.unparse(csvData, { 
-				delimiter: ',',
-				header: true
+			// Determine join key from job.column_mapping
+			const mapping = job.column_mapping || {};
+			const sourceTextCol = mapping.source_text_column || originalHeaders[0];
+			const rowIdCol = mapping.row_id_column && mapping.row_id_column.trim() !== '' ? mapping.row_id_column : null;
+			const joinKeyCol = rowIdCol || sourceTextCol;
+
+			// Build a map of translations by join key for fast lookup
+			const translationMap = new Map<string, any>();
+			for (const t of translations || []) {
+				const key = rowIdCol ? t.row_id : t.source_text;
+				if (key !== undefined && key !== null) {
+					translationMap.set(String(key).trim(), t);
+				}
+			}
+
+			// Determine the target language code for the new column
+			const targetLang = job.target_language || 'translated';
+			const outputHeaders = [...originalHeaders, targetLang];
+
+			// Build the output rows
+			const outputRows = originalRows.map((row) => {
+				const joinKey = row[joinKeyCol] !== undefined && row[joinKeyCol] !== null
+					? String(row[joinKeyCol]).trim()
+					: undefined;
+				const translation = joinKey ? translationMap.get(joinKey) : undefined;
+				if (!translation && process.env.NODE_ENV === 'development') {
+					logger.warn('CSV Download: No translation found for row', { joinKeyCol, joinKey, row });
+				}
+				return {
+					...row,
+					[targetLang]: translation ? translation.target_text : ''
+				};
 			});
-			
+
+			const csvContent = Papa.unparse(outputRows, {
+				delimiter: ',',
+				header: true,
+				columns: outputHeaders
+			});
+
 			// Return CSV with proper headers
 			return new Response(csvContent, {
 				headers: {
 					'Content-Type': 'text/csv',
-					'Content-Disposition': `attachment; filename="${job.name || 'job'}_translations_page_${page}.csv"`
+					'Content-Disposition': `attachment; filename="${job.name || 'job'}_translations.csv"`
 				}
 			});
 		}

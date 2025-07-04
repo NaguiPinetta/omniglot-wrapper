@@ -279,10 +279,10 @@ export async function uploadAndCreateDataset(
     console.log('Generating file preview...');
     const preview = await previewFile(file);
     console.log('Preview generated:', { headers: preview.headers, totalRows: preview.totalRows });
-    
-    // Store the actual CSV content as text for later access
+  
+  // Store the actual CSV content as text for later access
     console.log('Reading file content...');
-    const fileContent = await file.text();
+  const fileContent = await file.text();
     console.log('File content length:', fileContent.length);
     
     // Get user ID for the dataset
@@ -292,10 +292,10 @@ export async function uploadAndCreateDataset(
     
     // Prepare dataset record
     const datasetRecord = {
-      name: formData.name,
-      row_count: preview.totalRows,
-      file_url: `${file.name}`, // Store original filename
-      file_content: fileContent, // Store the actual file content
+    name: formData.name,
+    row_count: preview.totalRows,
+    file_url: `${file.name}`, // Store original filename
+    file_content: fileContent, // Store the actual file content
       columns: preview.headers, // Store column headers
       user_id: userId // Include user_id in the insert
     };
@@ -322,29 +322,29 @@ export async function uploadAndCreateDataset(
 
     console.log('Dataset created successfully:', data.id);
 
-    // Map the response to match the expected Dataset interface
-    const dataset: Dataset = {
-      id: data.id,
-      name: data.name,
-      description: formData.description || '',
-      file_name: file.name,
+  // Map the response to match the expected Dataset interface
+  const dataset: Dataset = {
+    id: data.id,
+    name: data.name,
+    description: formData.description || '',
+    file_name: file.name,
       file_size: 0, // Not in database, use 0
-      file_type: getFileType(file.name),
-      row_count: preview.totalRows,
-      columns: preview.headers,
-      status: 'ready',
+    file_type: getFileType(file.name),
+    row_count: preview.totalRows,
+    columns: preview.headers,
+    status: 'ready',
       user_id: userId,
-      created_at: data.uploaded_at || new Date().toISOString(),
-      updated_at: data.uploaded_at || new Date().toISOString(),
-      file_url: data.file_url,
-      file_content: data.file_content
-    };
+    created_at: data.uploaded_at || new Date().toISOString(),
+    updated_at: data.uploaded_at || new Date().toISOString(),
+    file_url: data.file_url,
+    file_content: data.file_content
+  };
 
     console.log('=== DATASET UPLOAD DEBUG END (SUCCESS) ===');
-    return {
-      dataset,
-      preview
-    };
+  return {
+    dataset,
+    preview
+  };
   } catch (error) {
     console.error('=== DATASET UPLOAD DEBUG END (ERROR) ===');
     console.error('Upload error details:', error);
@@ -364,12 +364,12 @@ export async function getDatasetPreview(
   
   try {
     console.log('Executing database query...');
-    const { data, error } = await client
-      .from('datasets')
+  const { data, error } = await client
+    .from('datasets')
       .select('file_content, columns, file_url')
-      .eq('id', datasetId)
-      .single();
-    
+    .eq('id', datasetId)
+    .single();
+  
     console.log('Database query result:', { hasData: !!data, error });
     
     if (error) {
@@ -381,12 +381,12 @@ export async function getDatasetPreview(
       });
       throw error;
     }
-    
-    if (!data.file_content) {
+  
+  if (!data.file_content) {
       console.error('No file content found for dataset');
-      throw new Error('Dataset content not found. Please re-upload the dataset.');
-    }
-    
+    throw new Error('Dataset content not found. Please re-upload the dataset.');
+  }
+  
     console.log('File content found, length:', data.file_content.length);
     console.log('Columns:', data.columns);
     console.log('File URL:', data.file_url);
@@ -441,30 +441,30 @@ export async function getDatasetPreview(
 
     // Default: CSV logic
     console.log('Processing CSV file...');
-    return new Promise((resolve, reject) => {
-      const config = {
-        header: true,
-        complete: (results: Papa.ParseResult<Record<string, any>>) => {
+  return new Promise((resolve, reject) => {
+    const config = {
+      header: true,
+      complete: (results: Papa.ParseResult<Record<string, any>>) => {
           console.log('Papa Parse complete:', { 
             dataLength: results.data.length, 
             fieldsLength: results.meta.fields?.length,
             errors: results.errors 
           });
           
-          const allRows = results.data.filter(row => 
-            // Filter out empty rows
-            Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
-          );
-          
+        const allRows = results.data.filter(row => 
+          // Filter out empty rows
+          Object.values(row).some(value => value !== null && value !== undefined && String(value).trim() !== '')
+        );
+        
           const result = {
-            headers: results.meta.fields || data.columns || [],
-            rows: allRows.slice(0, 5).map(row => 
-              Object.entries(row).reduce((acc, [key, value]) => {
-                acc[key] = String(value ?? '');
-                return acc;
-              }, {} as Record<string, string>)
-            ),
-            totalRows: allRows.length
+          headers: results.meta.fields || data.columns || [],
+          rows: allRows.slice(0, 5).map(row => 
+            Object.entries(row).reduce((acc, [key, value]) => {
+              acc[key] = String(value ?? '');
+              return acc;
+            }, {} as Record<string, string>)
+          ),
+          totalRows: allRows.length
           };
           
           console.log('CSV processing complete:', result);
@@ -476,9 +476,9 @@ export async function getDatasetPreview(
           console.log('=== GET DATASET PREVIEW DEBUG END (CSV ERROR) ===');
           reject(error);
         }
-      };
-      Papa.parse(data.file_content, config);
-    });
+    };
+    Papa.parse(data.file_content, config);
+  });
   } catch (error) {
     console.error('=== GET DATASET PREVIEW DEBUG END (ERROR) ===');
     console.error('Unexpected error in getDatasetPreview:', error);
